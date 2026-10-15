@@ -47,6 +47,13 @@ test("public state exposes integration availability but never any PayPal credent
   assert.equal(JSON.stringify(state).includes(env.PAYPAL_CLIENT_SECRET), false);
 });
 
+test("public PayPal readiness stays disabled if the payment quote signing key is missing", async () => {
+  const { res } = harness();
+  await createStateHandler({ ...env, PACT_PAYMENT_SIGNING_KEY: "" })(req("GET"), res);
+  const state = JSON.parse(res.body);
+  assert.equal(state.config.paypal.configured, false);
+});
+
 test("hosted AI forwards only bounded user-selected text and independently verifies quotes", async () => {
   const sourceText = "The landing page includes two revisions and is due November 20, 2026.";
   let forwarded;

@@ -4,7 +4,9 @@ export function createStateHandler(environment = process.env) {
   return async function handler(req, res) {
     if (req.method !== "GET") return sendMethodNotAllowed(res, "GET");
     const paypalConfigured = environment.PAYPAL_ENV === "sandbox"
-      && Boolean(environment.PAYPAL_CLIENT_ID && environment.PAYPAL_CLIENT_SECRET);
+      && Boolean(environment.PAYPAL_CLIENT_ID && environment.PAYPAL_CLIENT_SECRET)
+      && typeof environment.PACT_PAYMENT_SIGNING_KEY === "string"
+      && environment.PACT_PAYMENT_SIGNING_KEY.length >= 32;
     const aiConfigured = Boolean(environment.PACT_AI_ENDPOINT && environment.PACT_AI_BRIDGE_TOKEN);
     return sendJson(res, 200, {
       demoOnly: true,
