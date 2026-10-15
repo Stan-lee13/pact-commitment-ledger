@@ -65,7 +65,7 @@ AI never decides what was agreed. A matching quote is provenance assistance, not
 
 ## License
 
-No license is included in this public repository. The maintainer should confirm ownership and choose a license before granting reuse rights.
+This project is licensed under the MIT License. See [`LICENSE`](LICENSE) for the full terms.
 
 ## Architecture
 

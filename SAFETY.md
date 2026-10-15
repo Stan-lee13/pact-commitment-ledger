@@ -9,4 +9,4 @@ The local Node server is a disposable prototype, not a live contract, client por
 3. PayPal credentials must be Sandbox-only. Every standard Orders v2 capture goes to the configured Sandbox merchant account. No provider payout, split settlement, or escrow is implemented. PayPal's production marketplace services require partner approval.
 4. The local JSON file store is single-process and not production persistence. The public static demo is isolated per browser, not a multi-user product.
 5. Before any real-user or live-payment use, complete privacy, legal, security, accessibility, reliability, payment-partner, and operational reviews. Never imply that a payment proves delivery or creates escrow.
-6. No license is currently granted by this repository; choose a license only after confirming ownership and intent.
+6. This repository is licensed under the MIT License; see [`LICENSE`](LICENSE) for the terms.
