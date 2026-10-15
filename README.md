@@ -6,11 +6,17 @@ PACT is a hackathon prototype for recording service-work terms, versioned change
 
 **Live demo:** [Open PACT on Vercel](https://pact-commitment-ledger.vercel.app)
 
-The Vercel deployment is a **static, browser-local demo**. It uses fictional seed records and stores each visitor's changes in that visitor's browser `localStorage`; visitors do not share records. There are no user accounts, cloud synchronization, server-side writes, live payments, or public AI calls. AI extraction and PayPal Sandbox are intentionally disabled on the hosted demo. Do not enter real names, contract terms, messages, or payment data.
+The Vercel deployment serves a **browser-local demo plus serverless AI/PayPal routes**. Fictional seed records and each visitor's edits stay in that visitor's browser `localStorage`; visitors do not share records and there are no user accounts or cloud synchronization. PayPal uses a hosted Sandbox approval page and server-side capture; no PayPal credential is sent to the browser. Optional AI sends only the text selected in the form to a temporary authenticated Ollama/Qwen3 service hosted on the builder's computer; that service can be unavailable when the computer sleeps. Use fictional text only. Do not enter real names, contract terms, messages, or payment data. No paid AI API or live-money PayPal credentials are used.
 
 Use **Reset this browser demo** in the workspace or clear this site's browser storage to restore the fictional seed. Browser-local storage is not a secure vault; this mode is for demonstration only.
 
-The demo includes full amendment comparisons, per-deliverable self-reported progress, an across-agreement outstanding-obligations view, search/status filters, JSON and CSV exports, and evidence notes with optional small attachments. Attachments are restricted to PDF/PNG/JPEG/TXT/CSV/Markdown, 256 KiB each and 1 MiB per agreement; they remain in local browser storage and are embedded in JSON exports. Optional browser notifications are derived from pending responses and due dates and run only while this page is open in this browser. There is no email, push service, or background scheduler.
+## Quick judge walkthrough
+
+1. **AI:** Open **New Agreement**, paste a fictional source note, and select **Extract suggestions**. Each suggestion stays a draft with a visible source quote; review and apply it yourself. Only the selected text is sent to the temporary Ollama bridge.
+2. **Agreement flow:** Switch between Provider and Client demo roles, accept the seed draft, propose a change, inspect the version diff, and explicitly accept, clarify, or reject. Then try delivery progress, evidence notes, outstanding obligations, browser reminders, JSON/CSV export, and safe deletion of an unpaid record.
+3. **PayPal:** Open the seed agreement with its accepted version, switch to Client, and select **Continue to PayPal Sandbox**. PayPal shows the test amount on its hosted approval page; after a Sandbox buyer approves, PACT returns and captures/verifies the order server-side. Use a Sandbox buyer account you control; there is no buyer login in this repository. No live-money checkout is available.
+
+The demo includes full amendment comparisons, per-deliverable self-reported progress, an across-agreement outstanding-obligations view, search/status filters, JSON and CSV exports, safe deletion of unpaid browser-local records, and evidence notes with optional small attachments. Attachments are restricted to PDF/PNG/JPEG/TXT/CSV/Markdown, 256 KiB each and 1 MiB per agreement; they remain in local browser storage and are embedded in JSON exports. Optional browser notifications are derived from pending responses and due dates and run only while this page is open in this browser. There is no email, push service, or background scheduler.
 
 ## Run locally
 
@@ -26,7 +32,9 @@ npm start
 
 Open <http://127.0.0.1:3000>. The local Node server stores synthetic and user-entered prototype records in `data/store.json` (ignored by Git). The local mode is still single-process, unauthenticated, and not safe for real client data. Use `cp .env.example .env` only if you need to configure local Ollama or PayPal Sandbox; leave payment secrets blank otherwise.
 
-Optional local AI uses Ollama on the same computer. Candidate terms are suggestions only: exact source quotes are checked, and a person must review and apply every field. Source text is sent only to the configured local Ollama endpoint.
+Optional local AI uses Ollama on the same computer. Candidate terms are suggestions only: exact source quotes are checked, and a person must review and apply every field. For the public demo, a small authenticated bridge forwards the selected text to local Ollama; no prompt is deliberately logged by the bridge, but the service is temporary and must be treated as a public demo dependency. See `scripts/ollama-bridge.mjs` for the bounded request and token checks.
+
+The public AI route is enabled only while the temporary Ollama bridge is reachable. Its Vercel Production variables are `PACT_AI_ENDPOINT`, `PACT_AI_BRIDGE_TOKEN`, and `PACT_AI_MODEL`; set the same random token (at least 32 characters) as a sensitive Vercel variable and on the inference host. Start the bridge with `HOST=0.0.0.0 PORT=4174 PACT_AI_MODEL=qwen3:4b-instruct npm run ai:bridge` after exporting that token. The inference host must also have Ollama running with that model. If the host sleeps or Ollama is unavailable, the app keeps manual term entry available. No paid AI API is used.
 
 ## What the prototype demonstrates
 
@@ -38,11 +46,11 @@ Optional local AI uses Ollama on the same computer. Candidate terms are suggesti
 - Agreement records can be exported as JSON backups (including attachment data) or CSV summaries.
 - Optional due-date and response reminders are browser-local; notifications require opt-in and work only while the page is open.
 - The displayed agreement, any payment reference, and reported work status remain separate.
-- PayPal support, when enabled locally, uses Sandbox Orders v2 and calculates the amount on the server. A standard Sandbox capture goes to the configured test merchant, **not** the service provider. It is not escrow, a payout, or proof of delivery.
+- PayPal Checkout uses Sandbox Orders v2, creates the order from the current accepted version, signs the quote for capture, and verifies the captured amount and currency on the server. A standard Sandbox capture goes to the configured test merchant, **not** the service provider. It is not escrow, a payout, or proof of delivery. The role selector is only a simulator; do not treat the public route as authenticated.
 
-## PayPal Sandbox (local development only)
+## PayPal Sandbox
 
-Set `PAYPAL_ENV=sandbox`, `PAYPAL_CLIENT_ID`, and `PAYPAL_CLIENT_SECRET` in the local server environment. Checkout remains disabled when either credential is absent. Keep credentials out of source control and never substitute live credentials. The prototype supports one USD Sandbox payment per agreement.
+For local Node development, set `PAYPAL_ENV=sandbox`, `PAYPAL_CLIENT_ID`, and `PAYPAL_CLIENT_SECRET` in the server environment. For hosted Vercel, set `PAYPAL_ENV`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PACT_PAYMENT_SIGNING_KEY`, and `PACT_PUBLIC_URL` as server-side Production environment variables. All PayPal credentials remain server-side. The server creates the Orders v2 order, validates PayPal's `approve`/`payer-action` link is a Sandbox checkout URL, then the browser redirects to that hosted page. A signed expiring quote binds the order, agreement version, and amount; after PayPal returns, the server captures and verifies the completed amount and currency. Never substitute live credentials. The demo supports one USD Sandbox payment per agreement and only enables checkout for a mutually accepted version with a positive amount. Use a Sandbox buyer account you control; no buyer credentials are included in this repository.
 
 PayPal marketplace/seller settlement for production requires PayPal partner approval and a separately reviewed integration. No live-money payment or provider payout is implemented here.
 
@@ -56,7 +64,7 @@ npm run build
 npm audit --omit=dev
 ```
 
-GitHub Actions runs the test, syntax, build, and dependency-audit checks on Node 22 and 24. The static build intentionally contains only the front-end, the shared domain rules, and fictional seed data; it does not include the Node server, local JSON store, environment files, or PayPal credentials. Vercel adds a restrictive Content Security Policy, HSTS, and standard security headers.
+GitHub Actions runs the test, syntax, build, and dependency-audit checks on Node 22 and 24. The static output contains the front-end, shared domain rules, and fictional seed data; Vercel deploys the Node API routes separately. The build does not include the local JSON store, environment files, or PayPal credentials. Vercel adds a restrictive Content Security Policy, HSTS, and standard security headers.
 
 ## Production boundary — read before real use
 

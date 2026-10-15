@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createSeedState } from "../src/demo-data.mjs";
-import { addEvidence, createEngagement, deriveOutstandingObligations, deriveReminders, getDeliverableProgress, proposeChange, respondToVersion, updateDeliverableProgress } from "../src/domain.mjs";
+import { addEvidence, createEngagement, deleteEngagement, deriveOutstandingObligations, deriveReminders, getDeliverableProgress, proposeChange, respondToVersion, updateDeliverableProgress } from "../src/domain.mjs";
 
 const now = "2026-10-15T12:00:00.000Z";
 
@@ -160,4 +160,15 @@ test("evidence attachments accept only bounded supported data and remain self-re
   assert.throws(() => addEvidence(state, engagement.id, {
     description: "Oversized file", attachment: { name: "large.txt", type: "text/plain", size: 256 * 1024 + 1, dataUrl: "data:text/plain;base64,SGVsbG8=" }
   }, "provider", now), /between 1 byte and 256 KiB/);
+});
+
+test("provider can delete an unpaid demo agreement, but not a record with a Sandbox order", () => {
+  const state = acceptedState();
+  const engagement = state.engagements[0];
+  assert.throws(() => deleteEngagement(state, engagement.id, "client"), /Only the provider/);
+  engagement.payment.orderId = "SANDBOX-ORDER-1";
+  assert.throws(() => deleteEngagement(state, engagement.id, "provider"), /Keep its payment reference/);
+  engagement.payment.orderId = null;
+  assert.deepEqual(deleteEngagement(state, engagement.id, "provider"), { deleted: true, engagementId: engagement.id });
+  assert.equal(state.engagements.length, 0);
 });

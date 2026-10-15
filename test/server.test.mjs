@@ -13,8 +13,7 @@ test("API keeps agreement and payment states separate and ignores client-supplie
   let createdOrderArgs;
   const paypal = {
     configured: true,
-    publicClientId: "SANDBOX_PUBLIC_CLIENT_ID",
-    async createOrder(args) { createdOrderArgs = args; return { id: "SANDBOXORDER-123", status: "CREATED" }; },
+    async createOrder(args) { createdOrderArgs = args; return { id: "SANDBOXORDER-123", status: "CREATED", links: [{ rel: "payer-action", href: "https://www.sandbox.paypal.com/checkoutnow?token=SANDBOXORDER-123" }] }; },
     async captureOrder(orderId) {
       assert.equal(orderId, "SANDBOXORDER-123");
       return { id: orderId, status: "COMPLETED", purchase_units: [{ payments: { captures: [{ id: "CAPTURE-123", status: "COMPLETED", amount: { currency_code: "USD", value: "425.00" } }] } }] };
@@ -25,7 +24,7 @@ test("API keeps agreement and payment states separate and ignores client-supplie
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
     const initial = await fetch(`${base}/api/state`).then((r) => r.json());
-    assert.equal(initial.config.paypal.clientId, "SANDBOX_PUBLIC_CLIENT_ID");
+    assert.equal(initial.config.paypal.clientId, undefined);
     assert.equal(initial.config.paypal.clientSecret, undefined);
     assert.equal(initial.engagements[0].payment.requestIds, undefined);
 
@@ -69,8 +68,12 @@ test("API keeps agreement and payment states separate and ignores client-supplie
     assert.equal(orderResponse.status, 201);
     assert.equal(createdOrderArgs.amountMinor, 42500);
     assert.equal(createdOrderArgs.currency, "USD");
+    assert.equal(new URL(createdOrderArgs.returnUrl).origin, base);
+    assert.equal(new URL(createdOrderArgs.cancelUrl).origin, base);
     const order = await orderResponse.json();
     assert.match(order.merchantNotice, /not the service provider/);
+    assert.equal(order.approvalUrl, "https://www.sandbox.paypal.com/checkoutnow?token=SANDBOXORDER-123");
+    assert.equal(order.clientId, undefined);
 
     const captureResponse = await jsonPost(`${base}/api/paypal/orders/${order.orderId}/capture`, { role: "client", engagementId: engagement.id });
     assert.equal(captureResponse.status, 200);

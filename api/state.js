@@ -1,0 +1,28 @@
+import { sendJson, sendMethodNotAllowed } from "../src/vercel-http.mjs";
+
+export function createStateHandler(environment = process.env) {
+  return async function handler(req, res) {
+    if (req.method !== "GET") return sendMethodNotAllowed(res, "GET");
+    const paypalConfigured = environment.PAYPAL_ENV === "sandbox"
+      && Boolean(environment.PAYPAL_CLIENT_ID && environment.PAYPAL_CLIENT_SECRET);
+    const aiConfigured = Boolean(environment.PACT_AI_ENDPOINT && environment.PACT_AI_BRIDGE_TOKEN);
+    return sendJson(res, 200, {
+      demoOnly: true,
+      config: {
+        publicDemo: true,
+        storage: "browser_local",
+        ai: {
+          enabled: aiConfigured,
+          mode: aiConfigured ? "temporary_remote_ollama" : "disabled",
+          model: aiConfigured ? (environment.PACT_AI_MODEL || "qwen3:4b-instruct") : null
+        },
+        paypal: {
+          configured: paypalConfigured,
+          environment: "sandbox"
+        }
+      }
+    });
+  };
+}
+
+export default createStateHandler();

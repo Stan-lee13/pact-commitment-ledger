@@ -10,8 +10,6 @@ let appState = null;
 let selectedId = null;
 let role = localStorage.getItem("pact-demo-role") === "client" ? "client" : "provider";
 let toastTimer;
-let paypalSession = null;
-let paypalSdkPromise = null;
 let currentAiCandidates = [];
 let localDemoApi = null;
 
@@ -20,7 +18,12 @@ async function startPublicDemo() {
   const response = await fetch("/demo-state.json", { cache: "no-store" });
   if (!response.ok) throw new Error("The public demo seed could not be loaded.");
   const initialState = await response.json();
-  localDemoApi = createLocalDemoApi({ initialState, storage: window.localStorage, key: PUBLIC_DEMO_STORAGE_KEY });
+  let publicConfig = {};
+  try {
+    const configResponse = await fetch("/api/state", { cache: "no-store" });
+    if (configResponse.ok) publicConfig = (await configResponse.json()).config || {};
+  } catch {}
+  localDemoApi = createLocalDemoApi({ initialState, storage: window.localStorage, key: PUBLIC_DEMO_STORAGE_KEY, publicConfig });
   return localDemoApi;
 }
 
@@ -165,18 +168,18 @@ function renderPayment(engagement, version) {
   const dueMinor = terms.depositMinor ?? terms.amountMinor;
   const label = terms.depositMinor != null ? "Agreed initial deposit" : "Agreed project amount";
   let action = "";
-  if (appState.config?.publicDemo) {
-    action = '<div class="payment-disabled">PayPal is disabled in this public demo. No payment is processed.</div>';
-  } else if (!appState.config?.paypal?.configured) {
-    action = '<div class="payment-disabled">Sandbox checkout is disabled until server-side test credentials are configured.</div>';
+  if (!appState.config?.paypal?.configured) {
+    action = '<div class="payment-disabled">PayPal Sandbox checkout is temporarily unavailable. No payment was requested.</div>';
   } else if (payment.status === "captured") {
-    action = `<div class="payment-disabled"><strong>Sandbox capture confirmed</strong> · ${escapeHtml(formatMoney(payment.amountMinor, payment.currency))} to the configured test merchant. Not a provider payout.</div>`;
+    action = `<div class="payment-disabled"><strong>Sandbox capture verified</strong> · ${escapeHtml(formatMoney(payment.amountMinor, payment.currency))}${payment.captureId ? ` · Capture ${escapeHtml(payment.captureId)}` : ""} to the configured test merchant. Not a provider payout.</div>`;
   } else if (role === "client" && version && dueMinor > 0) {
-    action = `<div class="paypal-button-wrap"><button id="paypalCheckout" type="button" class="button button-dark">Pay with PayPal Sandbox <span aria-hidden="true">↗</span></button></div>`;
-  } else if (payment.status === "created") {
-    action = '<div class="payment-disabled">A Sandbox order exists. Switch to Client to test checkout.</div>';
+    action = `<div class="paypal-button-wrap"><button id="paypalCheckout" type="button" class="button button-dark">Continue to PayPal Sandbox <span aria-hidden="true">↗</span></button></div>`;
+  } else if (role !== "client") {
+    action = '<div class="payment-disabled">Switch the demo role to Client to open PayPal’s hosted Sandbox approval page.</div>';
+  } else if (!version || !Number.isSafeInteger(dueMinor) || dueMinor <= 0) {
+    action = '<div class="payment-disabled">Accept a version with a positive USD amount before starting Sandbox checkout.</div>';
   } else {
-    action = '<div class="payment-disabled">Sandbox checkout is a client-side test only.</div>';
+    action = '<div class="payment-disabled">PayPal Sandbox is unavailable. No payment was processed.</div>';
   }
   const status = payment.status === "not_started" ? "Not started" : payment.status.replaceAll("_", " ");
   const amount = payment.amountMinor ?? dueMinor;
@@ -229,13 +232,14 @@ function renderDetails() {
   const current = currentVersion(engagement);
   const pending = pendingVersion(engagement);
   const displayVersion = current || pending || engagement.versions.at(-1);
+  const hasSandboxOrder = Boolean(engagement.payment?.orderId || engagement.payment?.captureId);
   const party = role === "provider" ? engagement.clientName : engagement.providerName;
   const reviewLabel = current ? versionNumber(engagement, current) : "Draft · not yet mutually accepted";
   const terms = displayVersion?.terms || {};
   const noCurrentNote = current ? "" : '<div class="no-accepted"><strong>No mutually accepted version yet.</strong> The draft below is not the current agreement. It only becomes current after the client explicitly accepts it.</div>';
   container.innerHTML = `
     <section class="detail-card">
-      <div class="detail-header"><div class="detail-heading"><span class="eyebrow">${statusPill(engagement)} <span class="version-dot">·</span> ${escapeHtml(role === "provider" ? "PROVIDER VIEW" : "CLIENT VIEW")}</span><h2>${escapeHtml(engagement.title)}</h2><p class="detail-sub">With ${escapeHtml(party)} · Created ${escapeHtml(formatDate(engagement.createdAt?.slice(0, 10)))}</p></div><div class="detail-actions"><button class="button button-outline button-small" type="button" data-export-selected>Export record</button><button class="button button-outline button-small" type="button" data-open-change ${current ? "" : "disabled"}>Propose a change <span aria-hidden="true">＋</span></button></div></div>
+      <div class="detail-header"><div class="detail-heading"><span class="eyebrow">${statusPill(engagement)} <span class="version-dot">·</span> ${escapeHtml(role === "provider" ? "PROVIDER VIEW" : "CLIENT VIEW")}</span><h2>${escapeHtml(engagement.title)}</h2><p class="detail-sub">With ${escapeHtml(party)} · Created ${escapeHtml(formatDate(engagement.createdAt?.slice(0, 10)))}</p></div><div class="detail-actions"><button class="button button-outline button-small" type="button" data-export-selected>Export record</button><button class="button button-outline button-small" type="button" data-open-change ${current ? "" : "disabled"}>Propose a change <span aria-hidden="true">＋</span></button>${role === "provider" ? `<button class="button button-plain button-small" type="button" data-delete-selected ${hasSandboxOrder ? 'disabled title="Keep this record because it has a Sandbox order or capture."' : ""}>Delete local record</button>` : ""}</div></div>
       <div class="version-strip"><span>Current terms</span><strong>${escapeHtml(reviewLabel)}</strong><span class="version-dot">·</span><span>${current ? `Accepted by ${escapeHtml(engagement.providerName)} and ${escapeHtml(engagement.clientName)}` : "Waiting for explicit client response"}</span></div>
       ${noCurrentNote}
       ${renderChangeCard(engagement, pending, current)}
@@ -280,6 +284,7 @@ function renderObligations() {
 function safeExportEngagement(engagement) {
   const copy = structuredClone(engagement);
   if (copy.payment?.requestIds) delete copy.payment.requestIds;
+  if (copy.payment?.quoteToken) delete copy.payment.quoteToken;
   return copy;
 }
 
@@ -363,13 +368,19 @@ async function refresh({ keepSelection = true } = {}) {
   appState = await api("/api/state");
   const publicDemo = Boolean(appState.config?.publicDemo);
   if (publicDemo) {
-    $("#demoBannerText").innerHTML = "<strong>Public demo mode.</strong> Changes stay in this browser only. Use fictional names and terms; do not enter real client, contract, or payment details.";
+    const aiEnabled = Boolean(appState.config?.ai?.enabled);
+    const paypalEnabled = Boolean(appState.config?.paypal?.configured);
+    $("#demoBannerText").innerHTML = `<strong>Public demo mode.</strong> Records stay in this browser. ${aiEnabled ? "AI sends selected text to a temporary local-model service." : "AI service is currently unavailable."} ${paypalEnabled ? "PayPal uses Sandbox only." : "PayPal Sandbox is currently unavailable."} Use fictional data only; never enter real client, contract, or payment details.`;
     $("#storageLabel").textContent = "Browser-local demo";
     $("#storageNote").textContent = "Data stays in this browser; it is not shared across people or devices.";
-    $("#footerSafety").textContent = "Synthetic-data demo · No accounts, cloud sync, AI, or live payments";
-    $("#sourceText").disabled = true;
-    $("#extractButton").disabled = true;
-    $(".ai-local-note").textContent = "Unavailable in the public demo · local Ollama only";
+    $("#footerSafety").textContent = "Synthetic-data demo · No accounts or cloud sync · PayPal Sandbox only · AI service may be temporary";
+    $("#sourceText").disabled = !aiEnabled;
+    $("#extractButton").disabled = !aiEnabled;
+    $(".ai-local-note").textContent = aiEnabled
+      ? `Qwen3 4B · temporary local-model service · selected text is sent for this request only`
+      : "AI service is temporarily unavailable · enter terms manually";
+    const status = $("#integrationStatus");
+    if (status) status.innerHTML = `<div class="integration-item"><span class="integration-chip">AI</span><div><strong>Source-quoted term suggestions</strong><span>${aiEnabled ? `Enabled · ${escapeHtml(appState.config.ai.model || "Ollama")}` : "Offline · manual entry remains available"}</span></div></div><div class="integration-item"><span class="integration-chip paypal-chip">P</span><div><strong>PayPal Checkout</strong><span>${paypalEnabled ? "Hosted Sandbox approval · server-only credentials · verified capture" : "Sandbox credentials unavailable"}</span></div></div><div class="integration-disclaimer">AI never accepts terms. Sandbox captures go to the configured test merchant—not the provider; no PayPal credential is sent to the browser.</div>`;
   }
   $("#resetDemoButton").hidden = !publicDemo;
   if (!keepSelection || !appState.engagements.some((item) => item.id === selectedId)) selectedId = appState.engagements[0]?.id || null;
@@ -383,7 +394,7 @@ async function refresh({ keepSelection = true } = {}) {
 
 async function resetPublicDemo() {
   if (!appState?.config?.publicDemo) return;
-  if (!window.confirm("Reset this browser's demo data to the fictional sample? This affects only this browser.")) return;
+  if (!window.confirm("Reset this browser's local demo data to the fictional sample? This does not cancel or reverse any PayPal Sandbox order or capture.")) return;
   window.localStorage.removeItem(PUBLIC_DEMO_STORAGE_KEY);
   window.localStorage.removeItem("pact-demo-role");
   window.localStorage.removeItem("pact-browser-reminders-seen.v1");
@@ -391,6 +402,19 @@ async function resetPublicDemo() {
   selectedId = null;
   await refresh({ keepSelection: false });
   toast("This browser's demo data was reset to the fictional sample.");
+}
+
+async function deleteSelectedAgreement() {
+  const engagement = appState?.engagements?.find((item) => item.id === selectedId);
+  if (!engagement || role !== "provider") return;
+  if (engagement.payment?.orderId || engagement.payment?.captureId) return toast("Keep this agreement because it has a PayPal Sandbox order or capture.", true);
+  if (!window.confirm("Delete this agreement and its browser-local notes, attachments, and history? This cannot be undone unless you exported a backup.")) return;
+  try {
+    await api(`/api/engagements/${encodeURIComponent(selectedId)}`, { method: "DELETE", body: JSON.stringify({ role }) });
+    selectedId = null;
+    await refresh({ keepSelection: false });
+    toast("Agreement deleted from this browser only.");
+  } catch (error) { toast(error.message, true); }
 }
 
 function openNewAgreement() {
@@ -603,12 +627,12 @@ async function extractWithAI() {
   const button = $("#extractButton");
   if (!sourceText) return toast("Paste a short source note first.", true);
   button.disabled = true;
-  button.textContent = "Working locally…";
-  $("#aiResults").innerHTML = '<div class="ai-empty">Checking selected source text with the local model…</div>';
+  button.textContent = "Analyzing selected text…";
+  $("#aiResults").innerHTML = '<div class="ai-empty">Checking the selected source text and returned quotes…</div>';
   try {
     const result = await api("/api/ai/extract", { method: "POST", body: JSON.stringify({ sourceText }) });
     renderAiResults(result);
-    toast("Local AI suggestions are ready. Review source quotes before applying.");
+    toast("AI suggestions are ready. Review each source quote before applying.");
   } catch (error) {
     $("#aiResults").innerHTML = `<div class="ai-empty">${escapeHtml(error.message)}</div>`;
     toast(error.message, true);
@@ -618,23 +642,6 @@ async function extractWithAI() {
   }
 }
 
-async function loadPayPalSdk(clientId) {
-  if (window.paypal?.createInstance) return;
-  if (!paypalSdkPromise) {
-    paypalSdkPromise = new Promise((resolve, reject) => {
-      const script = document.createElement("script");
-      script.type = "module";
-      script.src = "https://www.sandbox.paypal.com/web-sdk/v6/core";
-      script.onload = () => resolve();
-      script.onerror = () => reject(new Error("PayPal Sandbox SDK could not load."));
-      document.head.appendChild(script);
-    });
-  }
-  await paypalSdkPromise;
-  if (!window.paypal?.createInstance) throw new Error("PayPal SDK v6 did not initialize. Check the current Sandbox SDK availability.");
-  if (!clientId) throw new Error("Sandbox client ID is missing.");
-}
-
 async function beginPayPalCheckout() {
   if (role !== "client") return toast("Switch to the Client demo role to test buyer checkout.", true);
   const engagement = appState?.engagements?.find((item) => item.id === selectedId);
@@ -642,36 +649,57 @@ async function beginPayPalCheckout() {
   const button = $("#paypalCheckout");
   if (!button) return;
   button.disabled = true;
-  button.textContent = "Opening Sandbox…";
+  button.textContent = "Preparing Sandbox checkout…";
   try {
-    await loadPayPalSdk(appState.config.paypal.clientId);
-    const sdkInstance = await window.paypal.createInstance({
-      clientId: appState.config.paypal.clientId,
-      components: ["paypal-payments"],
-      pageType: "checkout"
-    });
-    paypalSession = await sdkInstance.createPayPalOneTimePaymentSession({
-      onApprove: async (data) => {
-        try {
-          await api(`/api/paypal/orders/${encodeURIComponent(data.orderId)}/capture`, {
-            method: "POST", body: JSON.stringify({ role, engagementId: selectedId })
-          });
-          await refresh();
-          toast("Sandbox capture confirmed by the server. It went to the test merchant, not the service provider.");
-        } catch (error) { toast(error.message, true); await refresh(); }
-      },
-      onCancel: () => toast("Sandbox checkout cancelled. No agreement terms changed."),
-      onError: (error) => toast(error?.message || "PayPal Sandbox checkout reported an error.", true)
-    });
-    const orderPromise = api("/api/paypal/orders", { method: "POST", body: JSON.stringify({ role, engagementId: selectedId }) })
-      .then((result) => ({ orderId: result.orderId }));
-    await paypalSession.start({}, orderPromise);
+    const publicDemo = Boolean(appState.config?.publicDemo);
+    const current = engagement.versions?.find((version) => version.id === engagement.currentVersionId);
+    const orderRequest = publicDemo
+      ? { role, engagementId: selectedId, title: engagement.title, versionId: current?.id, acceptedVersion: current }
+      : { role, engagementId: selectedId };
+    const result = await api("/api/paypal/orders", { method: "POST", body: JSON.stringify(orderRequest) });
+    const approvalUrl = new URL(result.approvalUrl);
+    if (approvalUrl.protocol !== "https:" || !["www.sandbox.paypal.com", "sandbox.paypal.com"].includes(approvalUrl.hostname)
+      || approvalUrl.pathname !== "/checkoutnow") throw new Error("PayPal did not return a safe Sandbox approval link.");
+    window.location.assign(approvalUrl.href);
   } catch (error) {
     toast(error.message || "Sandbox checkout could not start.", true);
     await refresh();
   } finally {
     const currentButton = $("#paypalCheckout");
-    if (currentButton) { currentButton.disabled = false; currentButton.innerHTML = 'Pay with PayPal Sandbox <span aria-hidden="true">↗</span>'; }
+    if (currentButton) { currentButton.disabled = false; currentButton.innerHTML = 'Continue to PayPal Sandbox <span aria-hidden="true">↗</span>'; }
+  }
+}
+
+async function handlePayPalRedirectResult(params) {
+  const action = params.get("paypal");
+  if (action !== "return" && action !== "cancel") return;
+  const orderId = params.get("token");
+  const engagementId = params.get("engagementId");
+  window.history.replaceState(null, document.title, `${window.location.pathname}${window.location.hash}`);
+  role = "client";
+  localStorage.setItem("pact-demo-role", role);
+  $("#roleSelect").value = role;
+  if (engagementId) selectedId = engagementId;
+  await refresh();
+  if (action === "cancel") return toast("PayPal Sandbox checkout was cancelled; no capture was requested.");
+  if (!orderId) return toast("PayPal returned without an order reference. Payment remains unresolved.", true);
+  const engagement = appState?.engagements?.find((item) => item.id === engagementId);
+  if (!engagement || engagement.payment?.orderId !== orderId) {
+    return toast("The approved Sandbox order could not be matched to this browser-local record. Payment remains unresolved.", true);
+  }
+  try {
+    const publicDemo = Boolean(appState.config?.publicDemo);
+    if (publicDemo && !engagement.payment?.quoteToken) throw new Error("The signed capture quote is missing; do not retry with another order.");
+    const capture = publicDemo
+      ? await api("/api/paypal/capture", { method: "POST", body: JSON.stringify({ role, engagementId, orderId, quoteToken: engagement.payment.quoteToken }) })
+      : await api(`/api/paypal/orders/${encodeURIComponent(orderId)}/capture`, { method: "POST", body: JSON.stringify({ role, engagementId }) });
+    await refresh();
+    toast(capture.payment?.verified
+      ? "PayPal Sandbox capture was verified by the server. It went to the test merchant, not the service provider."
+      : "PayPal did not confirm a matching capture. Payment remains unresolved; check its status before retrying.", !capture.payment?.verified);
+  } catch (error) {
+    toast(error.message || "PayPal Sandbox capture could not be verified.", true);
+    await refresh();
   }
 }
 
@@ -700,6 +728,7 @@ function bindEvents() {
     if (event.target.closest("#enableReminderButton")) return enableBrowserReminders();
     if (event.target.closest("[data-open-new]")) return openNewAgreement();
     if (event.target.closest("[data-open-change]")) return openChangeDialog();
+    if (event.target.closest("[data-delete-selected]")) return deleteSelectedAgreement();
     const responseButton = event.target.closest("[data-respond]");
     if (responseButton) return respondToChange(responseButton);
     if (event.target.closest("#paypalCheckout")) return beginPayPalCheckout();
@@ -717,7 +746,10 @@ function bindEvents() {
 
 async function main() {
   bindEvents();
-  try { await refresh({ keepSelection: false }); }
+  try {
+    await refresh({ keepSelection: false });
+    if (new URLSearchParams(window.location.search).has("paypal")) await handlePayPalRedirectResult(new URLSearchParams(window.location.search));
+  }
   catch (error) { $("#engagementDetails").innerHTML = `<div class="detail-card empty-detail"><h2>Workspace could not load</h2><p>${escapeHtml(error.message)}</p></div>`; }
   window.setInterval(sendBrowserReminders, 15 * 60 * 1000);
 }

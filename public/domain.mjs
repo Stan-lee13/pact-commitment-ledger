@@ -87,6 +87,17 @@ export function getEngagement(state, engagementId) {
   return engagement;
 }
 
+export function deleteEngagement(state, engagementId, actorRole) {
+  assertRole(actorRole);
+  if (actorRole !== "provider") throw new DomainError("Only the provider can delete an agreement in this prototype.", 403);
+  const engagement = getEngagement(state, engagementId);
+  if (engagement.payment?.orderId || engagement.payment?.captureId || engagement.payment?.status === "captured") {
+    throw new DomainError("This agreement has a PayPal Sandbox order or capture. Keep its payment reference; delete is disabled.", 409);
+  }
+  state.engagements = state.engagements.filter((item) => item.id !== engagementId);
+  return { deleted: true, engagementId };
+}
+
 function addEvent(engagement, type, actor, at, label, extra = {}) {
   engagement.events.push({ id: randomUUID(), type, actor, at, label, ...extra });
 }

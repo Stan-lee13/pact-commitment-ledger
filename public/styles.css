@@ -306,3 +306,16 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 @media (prefers-reduced-motion: reduce) {
   *,*::before,*::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
+
+.integration-strip { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; padding: 15px 18px; margin: 0 0 16px; border: 1px solid #e4e8df; border-radius: 15px; background: #fff; box-shadow: 0 5px 18px rgba(22, 51, 39, .035); }
+.integration-item { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.integration-item > div { display: grid; gap: 3px; min-width: 0; }
+.integration-item strong { color: #34483c; font-size: 10px; }
+.integration-item span:not(.integration-chip) { color: #7b857c; font-size: 9px; line-height: 1.4; }
+.integration-chip { width: 28px; height: 28px; flex: 0 0 28px; display: grid; place-items: center; border-radius: 9px; background: #edf4e2; color: #52723c; font-size: 9px; font-weight: 850; }
+.integration-chip.paypal-chip { background: #edf1f8; color: #253b60; font-size: 13px; }
+.integration-disclaimer { grid-column: 1 / -1; padding-top: 9px; border-top: 1px solid #eef0eb; color: #8a9389; font-size: 8px; line-height: 1.5; }
+@media (max-width: 720px) {
+  .integration-strip { grid-template-columns: 1fr; gap: 12px; padding: 13px; margin-bottom: 12px; }
+  .integration-disclaimer { grid-column: auto; }
+}

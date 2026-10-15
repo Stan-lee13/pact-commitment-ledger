@@ -10,7 +10,7 @@ test("HTTP responses are no-store and CSP blocks unapproved scripts; AI calls ar
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "pact-headers-test-"));
   const { server } = await createAppServer({
     store: new FileStore(path.join(tempDir, "store.json")),
-    paypal: { configured: false, publicClientId: null },
+    paypal: { configured: false },
     ai: async ({ sourceText }) => ({ processing: "local_ollama", candidates: [{ field: "other", value: "example", exactQuote: sourceText, quoteVerified: true }] })
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));

@@ -54,10 +54,12 @@
       </div>
     </section>
 
+    <section id="integrationStatus" class="integration-strip" aria-label="Demo integrations" aria-live="polite"></section>
+
     <section class="stats-row" aria-label="Workspace summary">
       <div class="stat-card"><span class="stat-label">Agreements</span><strong id="statAgreements">—</strong><span class="stat-foot">in this demo workspace</span><span class="stat-icon icon-leaf" aria-hidden="true">↗</span></div>
       <div class="stat-card"><span class="stat-label">Needs a response</span><strong id="statNeedsResponse">—</strong><span class="stat-foot">explicit action only</span><span class="stat-icon icon-coral" aria-hidden="true">⌁</span></div>
-      <div class="stat-card"><span class="stat-label">Sandbox payments</span><strong id="statPayments">$0</strong><span class="stat-foot">no real money processed</span><span class="stat-icon icon-sand" aria-hidden="true">◌</span></div>
+      <div class="stat-card"><span class="stat-label">Sandbox payments</span><strong id="statPayments">$0</strong><span class="stat-foot">to the test merchant only</span><span class="stat-icon icon-sand" aria-hidden="true">◌</span></div>
       <div class="stat-card"><span class="stat-label">Open obligations</span><strong id="statObligations">—</strong><span class="stat-foot">responses and unfinished deliverables</span><span class="stat-icon icon-coral" aria-hidden="true">!</span></div>
     </section>
     <section id="obligationsPanel" class="obligations-panel detail-card" aria-labelledby="obligationsTitle"></section>
@@ -100,10 +102,10 @@
         <label class="field field-wide">Completion / review criteria<input id="completionCriteria" name="completionCriteria" maxlength="600" placeholder="What should the client review or respond to?"></label>
       </div>
       <details class="ai-disclosure">
-        <summary><span class="ai-sparkle" aria-hidden="true">✳</span><span><strong>Draft suggestions from source text</strong><small>Optional · Local AI · review every quote</small></span><span class="local-chip">LOCAL</span></summary>
+        <summary><span class="ai-sparkle" aria-hidden="true">✳</span><span><strong>Draft suggestions from source text</strong><small>Optional · source-quoted Qwen3 suggestions · human review required</small></span><span class="local-chip">AI</span></summary>
         <div class="ai-body">
-          <label class="field">Paste a short note or selected message<textarea id="sourceText" rows="4" maxlength="15000" placeholder="Paste only the source text you want analyzed. Do not paste sensitive or real client data in this prototype."></textarea></label>
-          <div class="ai-toolbar"><button id="extractButton" class="button button-outline" type="button">Extract suggestions <span aria-hidden="true">↗</span></button><span class="ai-local-note">Ollama on this computer · not sent to a paid AI API</span></div>
+          <label class="field">Paste a short fictional note or selected message<textarea id="sourceText" rows="4" maxlength="15000" placeholder="Use fictional text only. The selected text is sent to a temporary Ollama service for this request; do not paste real client data."></textarea></label>
+          <div class="ai-toolbar"><button id="extractButton" class="button button-outline" type="button">Extract suggestions <span aria-hidden="true">↗</span></button><span class="ai-local-note">Temporary Ollama service · fictional text only</span></div>
           <div id="aiResults" class="ai-results" aria-live="polite"></div>
         </div>
       </details>

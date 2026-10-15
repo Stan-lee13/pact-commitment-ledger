@@ -4,6 +4,10 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "installCommand": "npm install --ignore-scripts",
+  "functions": {
+    "api/ai/extract.js": { "maxDuration": 120 },
+    "api/paypal/*.js": { "maxDuration": 30 }
+  },
   "headers": [
     {
       "source": "/(.*)",

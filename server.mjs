@@ -4,9 +4,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { FileStore } from "./src/store.mjs";
-import { DomainError, addEvidence, createEngagement, getCurrentVersion, getEngagement, proposeChange, respondToVersion, updateDeliverableProgress } from "./src/domain.mjs";
+import { DomainError, addEvidence, createEngagement, deleteEngagement, getCurrentVersion, getEngagement, proposeChange, respondToVersion, updateDeliverableProgress } from "./src/domain.mjs";
 import { AIUnavailableError, extractTerms } from "./src/ai.mjs";
-import { PayPalError, PayPalSandbox, verifyCaptureAgainstExpected } from "./src/paypal.mjs";
+import { getSandboxApprovalUrl, PayPalError, PayPalSandbox, verifyCaptureAgainstExpected } from "./src/paypal.mjs";
 
 const APP_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(APP_DIR, "public");
@@ -15,7 +15,7 @@ const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; cha
 
 function securityHeaders() {
   return {
-    "Content-Security-Policy": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; script-src 'self' https://www.sandbox.paypal.com; connect-src 'self' https://api-m.sandbox.paypal.com; img-src 'self' data:; style-src 'self'; frame-src https://www.sandbox.paypal.com; form-action 'self' https://www.sandbox.paypal.com",
+    "Content-Security-Policy": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; script-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'; frame-src 'none'; form-action 'self'",
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "no-referrer",
@@ -59,6 +59,29 @@ function getPayableAmount(engagement) {
   return { amountMinor, currency: terms.currency || "USD", version };
 }
 
+function buildPayPalReturnUrl(action, engagementId, requestHost) {
+  let base;
+  try {
+    if (process.env.PACT_PUBLIC_URL) base = new URL(process.env.PACT_PUBLIC_URL);
+    else {
+      if (!/^(?:localhost|127\.0\.0\.1)(?::\d{1,5})?$/.test(String(requestHost ?? ""))) {
+        throw new PayPalError("Set PACT_PUBLIC_URL to the public HTTPS origin before enabling non-local checkout.", 503);
+      }
+      base = new URL(`http://${requestHost}`);
+    }
+  } catch (error) {
+    if (error instanceof PayPalError) throw error;
+    throw new PayPalError("PayPal return routing is not configured.", 503);
+  }
+  if (base.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(base.hostname)) {
+    throw new PayPalError("PayPal return routing must use HTTPS, except for local loopback development.", 503);
+  }
+  const result = new URL("/", base.origin);
+  result.searchParams.set("paypal", action);
+  result.searchParams.set("engagementId", engagementId);
+  return result.href;
+}
+
 export async function createAppServer({ store: suppliedStore, paypal: suppliedPayPal, ai = extractTerms } = {}) {
   const dataFile = process.env.PACT_DATA_FILE
     ? path.resolve(process.env.PACT_DATA_FILE)
@@ -79,7 +102,7 @@ export async function createAppServer({ store: suppliedStore, paypal: suppliedPa
             demoOnly: true,
             config: {
               ai: { mode: "local_ollama", model: process.env.PACT_AI_MODEL || "qwen3:4b-instruct" },
-              paypal: { configured: Boolean(paypal.configured), clientId: paypal.publicClientId ?? null, environment: "sandbox" }
+              paypal: { configured: Boolean(paypal.configured), environment: "sandbox" }
             }
           });
         }
@@ -88,6 +111,13 @@ export async function createAppServer({ store: suppliedStore, paypal: suppliedPa
           const body = await readJson(req);
           const engagement = await store.transact((state) => createEngagement(state, body, body.role || "provider"));
           return sendJson(res, 201, { engagement });
+        }
+
+        const deleteMatch = pathname.match(/^\/api\/engagements\/([^/]+)$/);
+        if (req.method === "DELETE" && deleteMatch) {
+          const body = await readJson(req);
+          const result = await store.transact((state) => deleteEngagement(state, decodeURIComponent(deleteMatch[1]), body.role));
+          return sendJson(res, 200, result);
         }
 
         const changeMatch = pathname.match(/^\/api\/engagements\/([^/]+)\/changes$/);
@@ -131,7 +161,7 @@ export async function createAppServer({ store: suppliedStore, paypal: suppliedPa
           let reservation = await store.transact((state) => {
             const engagement = getEngagement(state, body.engagementId);
             if (engagement.payment.status === "captured") return { alreadyCaptured: true, orderId: engagement.payment.orderId };
-            if (engagement.payment.orderId) return { existingOrder: true, orderId: engagement.payment.orderId };
+            if (engagement.payment.orderId) return { existingOrder: true, orderId: engagement.payment.orderId, approvalUrl: engagement.payment.approvalUrl };
             if (engagement.payment.status === "creating") return { busy: true };
             const { amountMinor, currency, version } = getPayableAmount(engagement);
             const requestId = engagement.payment.requestIds?.create || randomUUID();
@@ -142,23 +172,32 @@ export async function createAppServer({ store: suppliedStore, paypal: suppliedPa
             engagement.payment.currency = currency;
             engagement.payment.versionId = version.id;
             engagement.payment.updatedAt = new Date().toISOString();
-            return { requestId, engagementId: engagement.id, title: engagement.title, amountMinor, currency };
+            return {
+              requestId, engagementId: engagement.id, title: engagement.title, amountMinor, currency,
+              returnUrl: buildPayPalReturnUrl("return", engagement.id, req.headers.host),
+              cancelUrl: buildPayPalReturnUrl("cancel", engagement.id, req.headers.host)
+            };
           });
           if (reservation.alreadyCaptured) return sendJson(res, 409, { error: "This Sandbox payment is already captured.", orderId: reservation.orderId });
-          if (reservation.existingOrder) return sendJson(res, 200, { orderId: reservation.orderId, clientId: paypal.publicClientId, merchantNotice: "Sandbox payment only; the captured funds belong to the configured Sandbox merchant account, not the service provider." });
+          if (reservation.existingOrder) {
+            if (!reservation.approvalUrl) throw new DomainError("The saved Sandbox order has no approval link. Reconcile it before creating another order.", 409);
+            return sendJson(res, 200, { orderId: reservation.orderId, approvalUrl: reservation.approvalUrl, merchantNotice: "Sandbox payment only; the captured funds belong to the configured Sandbox merchant account, not the service provider." });
+          }
           if (reservation.busy) return sendJson(res, 409, { error: "A Sandbox order is already being created. Wait briefly and refresh." });
           try {
             const order = await paypal.createOrder({ ...reservation, requestId: reservation.requestId });
+            const approvalUrl = getSandboxApprovalUrl(order);
             await store.transact((state) => {
               const engagement = getEngagement(state, reservation.engagementId);
               if (engagement.payment.requestIds?.create === reservation.requestId) {
                 engagement.payment.orderId = order.id;
+                engagement.payment.approvalUrl = approvalUrl;
                 engagement.payment.status = "created";
                 engagement.payment.updatedAt = new Date().toISOString();
                 engagement.events.push({ id: randomUUID(), type: "sandbox_order_created", actor: "client", at: engagement.payment.updatedAt, label: `PayPal Sandbox order ${order.id} created for the configured test merchant. This is not a provider payout.` });
               }
             });
-            return sendJson(res, 201, { orderId: order.id, clientId: paypal.publicClientId, merchantNotice: "Sandbox payment only; any capture goes to the configured Sandbox merchant account, not the service provider." });
+            return sendJson(res, 201, { orderId: order.id, approvalUrl, merchantNotice: "Sandbox payment only; any capture goes to the configured Sandbox merchant account, not the service provider." });
           } catch (error) {
             await store.transact((state) => {
               const engagement = getEngagement(state, reservation.engagementId);

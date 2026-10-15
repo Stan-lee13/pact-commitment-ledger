@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { PayPalSandbox, formatMinorAmount, verifyCaptureAgainstExpected } from "../src/paypal.mjs";
+import { getSandboxApprovalUrl, PayPalSandbox, formatMinorAmount, verifyCaptureAgainstExpected } from "../src/paypal.mjs";
 
 const requestId = "123e4567-e89b-12d3-a456-426655440010";
 
@@ -15,19 +15,29 @@ test("Sandbox client uses server-provided amount and a stable request ID", async
   const fetchImpl = async (url, options) => {
     calls.push({ url, options });
     if (url.endsWith("/v1/oauth2/token")) return new Response(JSON.stringify({ access_token: "sandbox-access-token", expires_in: 3600 }), { status: 200 });
-    if (url.endsWith("/v2/checkout/orders")) return new Response(JSON.stringify({ id: "SANDBOXORDER-123", status: "CREATED" }), { status: 201 });
+    if (url.endsWith("/v2/checkout/orders")) return new Response(JSON.stringify({
+      id: "SANDBOXORDER-123", status: "CREATED", links: [{ rel: "payer-action", href: "https://www.sandbox.paypal.com/checkoutnow?token=SANDBOXORDER-123" }]
+    }), { status: 201 });
     if (url.endsWith("/v2/checkout/orders/SANDBOXORDER-123/capture")) return new Response(JSON.stringify({
       id: "SANDBOXORDER-123", status: "COMPLETED", purchase_units: [{ payments: { captures: [{ id: "CAPTURE-123", status: "COMPLETED", amount: { currency_code: "USD", value: "425.00" } }] } }]
     }), { status: 201 });
     throw new Error(`Unexpected URL ${url}`);
   };
   const client = new PayPalSandbox({ clientId: "sandbox-client", clientSecret: "sandbox-secret", fetchImpl });
-  const created = await client.createOrder({ engagementId: "demo-1", title: "Project deposit", amountMinor: 42500, currency: "USD", requestId });
+  const created = await client.createOrder({
+    engagementId: "demo-1", title: "Project deposit", amountMinor: 42500, currency: "USD", requestId,
+    returnUrl: "https://pact.example/?paypal=return", cancelUrl: "https://pact.example/?paypal=cancel"
+  });
   assert.equal(created.id, "SANDBOXORDER-123");
   const orderCall = calls.find((call) => call.url.endsWith("/v2/checkout/orders"));
   assert.equal(orderCall.options.headers["PayPal-Request-Id"], requestId);
   assert.equal(JSON.parse(orderCall.options.body).purchase_units[0].amount.value, "425.00");
-  assert.equal(JSON.parse(orderCall.options.body).intent, "CAPTURE");
+  const orderBody = JSON.parse(orderCall.options.body);
+  assert.equal(orderBody.intent, "CAPTURE");
+  assert.equal(orderBody.payment_source.paypal.experience_context.return_url, "https://pact.example/?paypal=return");
+  assert.equal(orderBody.payment_source.paypal.experience_context.cancel_url, "https://pact.example/?paypal=cancel");
+  assert.equal(getSandboxApprovalUrl(created), "https://www.sandbox.paypal.com/checkoutnow?token=SANDBOXORDER-123");
+  assert.throws(() => getSandboxApprovalUrl({ links: [{ rel: "approve", href: "https://www.paypal.com/checkoutnow?token=BAD" }] }), /unexpected approval destination/);
   const captured = await client.captureOrder("SANDBOXORDER-123", requestId);
   const captureCall = calls.find((call) => call.url.endsWith("/capture"));
   assert.equal(captureCall.options.headers["PayPal-Request-Id"], requestId);
