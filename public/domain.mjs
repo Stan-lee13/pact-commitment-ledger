@@ -183,12 +183,138 @@ export function addEvidence(state, engagementId, input, actorRole, at = new Date
       throw new DomainError("Evidence links must be valid HTTP or HTTPS URLs.");
     }
   }
-  const evidence = { id: randomUUID(), description, url, actor: actorRole, at, status: "reported" };
+  const attachment = input.attachment == null ? null : normalizeAttachment(input.attachment, engagement);
+  const evidence = { id: randomUUID(), description, url, attachment, actor: actorRole, at, status: "reported" };
   engagement.evidence.unshift(evidence);
-  addEvent(engagement, "evidence_reported", actorRole, at, `${actorRole === "provider" ? engagement.providerName : engagement.clientName} added a note reported by them. PACT has not verified fulfilment.`, { evidenceId: evidence.id });
+  addEvent(engagement, "evidence_reported", actorRole, at, `${actorRole === "provider" ? engagement.providerName : engagement.clientName} added a note reported by them${attachment ? " with an attachment" : ""}. PACT has not verified fulfilment.`, { evidenceId: evidence.id });
   return evidence;
 }
 
 export function getCurrentVersion(engagement) {
   return engagement.versions.find((version) => version.id === engagement.currentVersionId) ?? null;
+}
+
+const attachmentTypes = new Set(["application/pdf", "image/png", "image/jpeg", "text/plain", "text/csv", "text/markdown"]);
+const maxAttachmentBytes = 256 * 1024;
+const maxAgreementAttachmentBytes = 1024 * 1024;
+
+function normalizeAttachment(input, engagement) {
+  if (!input || typeof input !== "object") throw new DomainError("Choose a supported evidence attachment.");
+  const name = String(input.name ?? "").replace(/[\\/\0-\x1f\x7f]/g, "_").trim().slice(0, 160);
+  const type = String(input.type ?? "").toLowerCase();
+  const dataUrl = String(input.dataUrl ?? "");
+  if (!name) throw new DomainError("Attachment filename is required.");
+  if (!attachmentTypes.has(type)) throw new DomainError("Attachments must be PDF, PNG, JPEG, plain text, CSV, or Markdown files.");
+  if (!Number.isSafeInteger(input.size) || input.size < 1 || input.size > maxAttachmentBytes) {
+    throw new DomainError("Each attachment must be between 1 byte and 256 KiB.");
+  }
+  const match = dataUrl.match(/^data:([a-z0-9.+-]+\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/]*={0,2})$/i);
+  if (!match || match[1].toLowerCase() !== type || dataUrl.length > 400_000) throw new DomainError("Attachment data is invalid or does not match its file type.");
+  let actualBytes;
+  try {
+    const binary = atob(match[2]);
+    if (btoa(binary) !== match[2]) throw new Error("Invalid base64 encoding");
+    actualBytes = binary.length;
+  } catch {
+    throw new DomainError("Attachment data is not valid base64.");
+  }
+  if (actualBytes !== input.size) throw new DomainError("Attachment size does not match its content.");
+  const currentTotal = engagement.evidence.reduce((sum, item) => sum + (Number.isSafeInteger(item.attachment?.size) ? item.attachment.size : 0), 0);
+  if (currentTotal + actualBytes > maxAgreementAttachmentBytes) throw new DomainError("Attachments for one agreement are limited to 1 MiB total.");
+  return { name, type, size: actualBytes, dataUrl };
+}
+
+const progressStatuses = new Set(["not_started", "in_progress", "completed"]);
+
+export function getDeliverableProgress(engagement, versionId, deliverableIndex) {
+  const event = [...(engagement.events ?? [])].reverse().find((item) =>
+    item.type === "deliverable_progress_updated" && item.versionId === versionId && item.deliverableIndex === deliverableIndex
+  );
+  return event?.status ?? "not_started";
+}
+
+export function updateDeliverableProgress(state, engagementId, input, actorRole, at = new Date().toISOString()) {
+  assertRole(actorRole);
+  const engagement = getEngagement(state, engagementId);
+  const current = getCurrentVersion(engagement);
+  if (!current || current.status !== "accepted") throw new DomainError("A mutually accepted version is required to update delivery progress.", 409);
+  if (input.versionId !== current.id) throw new DomainError("This progress update is based on an outdated version. Refresh and try again.", 409);
+  if (!Number.isSafeInteger(input.deliverableIndex) || input.deliverableIndex < 0 || input.deliverableIndex >= current.terms.deliverables.length) {
+    throw new DomainError("Choose a deliverable in the current accepted version.");
+  }
+  if (!progressStatuses.has(input.status)) throw new DomainError("Progress must be not started, in progress, or completed.");
+  const label = `${actorRole === "provider" ? engagement.providerName : engagement.clientName} marked deliverable ${input.deliverableIndex + 1} as ${input.status.replaceAll("_", " ")}.`;
+  addEvent(engagement, "deliverable_progress_updated", actorRole, at, label, {
+    versionId: current.id, deliverableIndex: input.deliverableIndex, status: input.status
+  });
+  return engagement.events.at(-1);
+}
+
+function daysUntil(dateValue, now) {
+  if (!dateValue) return null;
+  const today = new Date(now);
+  const start = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  const due = Date.parse(`${dateValue}T00:00:00.000Z`);
+  return Number.isFinite(due) ? Math.round((due - start) / 86_400_000) : null;
+}
+
+export function deriveOutstandingObligations(engagements = [], role = "provider", now = new Date()) {
+  const obligations = [];
+  for (const engagement of engagements) {
+    const pending = [...(engagement.versions ?? [])].reverse().find((version) => version.status === "proposed");
+    if (pending) {
+      const needsYou = pending.proposedBy !== role;
+      obligations.push({
+        id: `response:${engagement.id}:${pending.id}`, engagementId: engagement.id, type: "response",
+        versionId: pending.id, title: engagement.title,
+        summary: needsYou ? "Your explicit response is needed" : `Waiting for ${pending.proposedBy === "provider" ? engagement.clientName : engagement.providerName}`,
+        detail: `Version ${pending.number}: ${pending.changeSummary}`, needsYou, priority: needsYou ? 0 : 1
+      });
+    }
+    const current = getCurrentVersion(engagement);
+    if (!current || current.status !== "accepted") continue;
+    const remaining = current.terms.deliverables.filter((_, index) => getDeliverableProgress(engagement, current.id, index) !== "completed").length;
+    const dueInDays = daysUntil(current.terms.dueDate, now);
+    let dueLabel = "";
+    if (remaining && dueInDays != null) {
+      if (dueInDays < 0) dueLabel = `${Math.abs(dueInDays)} day${Math.abs(dueInDays) === 1 ? "" : "s"} overdue`;
+      else if (dueInDays === 0) dueLabel = "Due today";
+      else dueLabel = `Due in ${dueInDays} day${dueInDays === 1 ? "" : "s"}`;
+    }
+    current.terms.deliverables.forEach((deliverable, index) => {
+      const status = getDeliverableProgress(engagement, current.id, index);
+      if (status === "completed") return;
+      obligations.push({
+        id: `deliverable:${engagement.id}:${current.id}:${index}`, engagementId: engagement.id, type: "deliverable",
+        versionId: current.id, deliverableIndex: index, title: engagement.title, summary: deliverable,
+        detail: `${status === "in_progress" ? "In progress" : "Not started"}${dueLabel ? ` · ${dueLabel}` : ""}`,
+        status, dueDate: current.terms.dueDate ?? null, dueInDays, priority: dueInDays != null && dueInDays < 0 ? 2 : 3
+      });
+    });
+  }
+  return obligations.sort((a, b) => a.priority - b.priority || String(a.title).localeCompare(String(b.title)) || String(a.summary).localeCompare(String(b.summary)));
+}
+
+export function deriveReminders(engagements = [], role = "provider", now = new Date()) {
+  const reminders = [];
+  for (const engagement of engagements) {
+    const pending = [...(engagement.versions ?? [])].reverse().find((version) => version.status === "proposed");
+    if (pending && pending.proposedBy !== role) reminders.push({
+      key: `response:${engagement.id}:${pending.id}`, type: "response", engagementId: engagement.id,
+      title: engagement.title, message: `Your explicit response is needed on version ${pending.number}.`, priority: 0
+    });
+    const current = getCurrentVersion(engagement);
+    if (!current || current.status !== "accepted") continue;
+    const remaining = current.terms.deliverables.filter((_, index) => getDeliverableProgress(engagement, current.id, index) !== "completed").length;
+    const dueInDays = daysUntil(current.terms.dueDate, now);
+    if (!remaining || dueInDays == null || dueInDays > 7) continue;
+    const type = dueInDays < 0 ? "overdue" : dueInDays === 0 ? "due_today" : "due_soon";
+    const timing = type === "overdue" ? `${Math.abs(dueInDays)} day${Math.abs(dueInDays) === 1 ? "" : "s"} overdue` : type === "due_today" ? "due today" : `due in ${dueInDays} day${dueInDays === 1 ? "" : "s"}`;
+    reminders.push({
+      key: `deadline:${engagement.id}:${current.id}:${current.terms.dueDate}:${type}`, type,
+      engagementId: engagement.id, title: engagement.title,
+      message: `${remaining} deliverable${remaining === 1 ? "" : "s"} remain; ${timing}.`, priority: type === "overdue" ? 1 : 2
+    });
+  }
+  return reminders.sort((a, b) => a.priority - b.priority || a.title.localeCompare(b.title));
 }

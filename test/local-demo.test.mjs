@@ -49,6 +49,40 @@ test("browser demo persists versioned agreement changes without altering its see
   assert.equal(after.engagements.length, 2);
 });
 
+test("browser demo records partial completion, bounded attachments, and multiple agreements", async () => {
+  const { api } = createHarness();
+  const first = (await api("/api/state")).engagements[0];
+  await post(api, `/api/engagements/${first.id}/progress`, {
+    role: "provider", versionId: "demo-v1", deliverableIndex: 0, status: "in_progress"
+  });
+  await post(api, `/api/engagements/${first.id}/evidence`, {
+    role: "client", description: "Synthetic review note", attachment: {
+      name: "note.txt", type: "text/plain", size: 5, dataUrl: "data:text/plain;base64,SGVsbG8="
+    }
+  });
+  const second = await post(api, "/api/engagements", {
+    role: "provider", title: "Second synthetic project", providerName: "Ari", clientName: "Sam",
+    terms: { deliverables: ["One prototype screen"] }
+  });
+  const state = await api("/api/state");
+  const saved = state.engagements.find((item) => item.id === first.id);
+  assert.equal(saved.events.find((item) => item.type === "deliverable_progress_updated")?.status, "in_progress");
+  assert.equal(saved.evidence[0].attachment.dataUrl, "data:text/plain;base64,SGVsbG8=");
+  assert.equal(state.engagements.length, 2);
+  assert.ok(state.engagements.some((item) => item.id === second.engagement.id));
+});
+
+test("browser demo reports local storage quota errors without losing state silently", async () => {
+  const storage = {
+    getItem: () => null,
+    setItem: () => { throw Object.assign(new Error("full"), { name: "QuotaExceededError" }); }
+  };
+  const api = createLocalDemoApi({ initialState: createSeedState(), storage });
+  await assert.rejects(post(api, "/api/engagements", {
+    role: "provider", title: "Quota test", providerName: "Ari", clientName: "Sam", terms: { deliverables: ["Prototype"] }
+  }), /Browser demo storage is full/);
+});
+
 test("concurrent browser-local writes are serialized without dropping an agreement", async () => {
   const { api } = createHarness();
   const create = (title) => post(api, "/api/engagements", {
@@ -89,4 +123,10 @@ test("static build is reproducible and excludes server, store, and environment f
   assert.equal(state.engagements[0].providerName, "Maya Okafor");
   const html = await readFile(path.join(root, "dist", "index.html"), "utf8");
   assert.match(html, /name="pact-public-demo" content="true"/);
+  assert.match(html, /id="obligationsPanel"/);
+  assert.match(html, /id="agreementSearch"/);
+  const app = await readFile(path.join(root, "dist", "app.js"), "utf8");
+  assert.match(app, /Export JSON backup/);
+  assert.match(app, /sendBrowserReminders/);
+  assert.match(app, /data-progress/);
 });

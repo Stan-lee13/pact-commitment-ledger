@@ -46,6 +46,23 @@ test("API keeps agreement and payment states separate and ignores client-supplie
     });
     assert.equal(accepted.status, 200);
 
+    const progressResponse = await jsonPost(`${base}/api/engagements/${engagement.id}/progress`, {
+      role: "provider", versionId: engagement.versions[0].id, deliverableIndex: 0, status: "in_progress"
+    });
+    assert.equal(progressResponse.status, 200);
+    const evidenceResponse = await jsonPost(`${base}/api/engagements/${engagement.id}/evidence`, {
+      role: "client", description: "Synthetic attached preview", attachment: {
+        name: "preview.txt", type: "text/plain", size: 5, dataUrl: "data:text/plain;base64,SGVsbG8="
+      }
+    });
+    assert.equal(evidenceResponse.status, 201);
+    const rejectedAttachment = await jsonPost(`${base}/api/engagements/${engagement.id}/evidence`, {
+      role: "client", description: "Not an allowed attachment", attachment: {
+        name: "unsafe.svg", type: "image/svg+xml", size: 5, dataUrl: "data:image/svg+xml;base64,SGVsbG8="
+      }
+    });
+    assert.equal(rejectedAttachment.status, 400);
+
     const orderResponse = await jsonPost(`${base}/api/paypal/orders`, {
       role: "client", engagementId: engagement.id, amountMinor: 1, currency: "NGN"
     });
@@ -63,6 +80,8 @@ test("API keeps agreement and payment states separate and ignores client-supplie
     assert.equal(saved.payment.verified, true);
     assert.equal(saved.currentVersionId, engagement.versions[0].id);
     assert.equal(saved.payment.requestIds, undefined);
+    assert.equal(saved.events.find((event) => event.type === "deliverable_progress_updated")?.status, "in_progress");
+    assert.equal(saved.evidence[0].attachment.name, "preview.txt");
     assert.ok(saved.events.some((event) => /not a provider payout/.test(event.label)));
   } finally {
     await new Promise((resolve) => server.close(resolve));

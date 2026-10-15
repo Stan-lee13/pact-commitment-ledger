@@ -1,4 +1,5 @@
 import { createLocalDemoApi, PUBLIC_DEMO_STORAGE_KEY } from "./local-demo.mjs";
+import { deriveOutstandingObligations, deriveReminders, getDeliverableProgress } from "./domain.mjs";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -88,10 +89,29 @@ function statusPill(engagement) {
 
 function renderList() {
   const container = $("#engagementList");
-  const engagements = appState?.engagements || [];
-  $("#agreementCount").textContent = engagements.length;
-  if (!engagements.length) {
+  const allEngagements = appState?.engagements || [];
+  const query = $("#agreementSearch")?.value.trim().toLocaleLowerCase() || "";
+  const filter = $("#agreementStatusFilter")?.value || "all";
+  const engagements = allEngagements.filter((engagement) => {
+    const partyText = `${engagement.title} ${engagement.providerName} ${engagement.clientName}`.toLocaleLowerCase();
+    const pending = Boolean(pendingVersion(engagement));
+    const current = Boolean(currentVersion(engagement));
+    const matchesQuery = !query || partyText.includes(query);
+    const matchesFilter = filter === "all"
+      || (filter === "awaiting" && pending)
+      || (filter === "accepted" && current && !pending)
+      || (filter === "attention" && deriveOutstandingObligations([engagement], role, new Date()).length > 0)
+      || (filter === "draft" && !current && !pending);
+    return matchesQuery && matchesFilter;
+  });
+  $("#agreementCount").textContent = allEngagements.length;
+  if (!engagements.some((item) => item.id === selectedId)) selectedId = engagements[0]?.id || null;
+  if (!allEngagements.length) {
     container.innerHTML = '<div class="empty-list">No agreements yet.<br>Start with one clear project.</div>';
+    return;
+  }
+  if (!engagements.length) {
+    container.innerHTML = '<div class="empty-list">No agreements match this search or filter.</div>';
     return;
   }
   container.innerHTML = engagements.map((engagement) => {
@@ -112,13 +132,20 @@ function termValue(label, value, icon, wide = false) {
 }
 
 function compareRows(current, proposed) {
-  const rows = [];
-  if (JSON.stringify(current?.deliverables) !== JSON.stringify(proposed?.deliverables)) rows.push(["Deliverables", `${current?.deliverables?.length || 0} items`, `${proposed?.deliverables?.length || 0} items`]);
-  if (current?.dueDate !== proposed?.dueDate) rows.push(["Due date", formatDate(current?.dueDate), formatDate(proposed?.dueDate)]);
-  if (current?.amountMinor !== proposed?.amountMinor) rows.push(["Total fee", formatMoney(current?.amountMinor, current?.currency), formatMoney(proposed?.amountMinor, proposed?.currency)]);
-  if (current?.revisionLimit !== proposed?.revisionLimit) rows.push(["Revision limit", current?.revisionLimit || "Not specified", proposed?.revisionLimit || "Not specified"]);
-  if (!rows.length) rows.push(["Terms", "Current accepted", "Updated terms"]);
-  return rows.map(([label, before, after]) => `<div class="diff-row"><span>${escapeHtml(label)}</span><strong>${escapeHtml(before)} <span aria-hidden="true">→</span> ${escapeHtml(after)}</strong></div>`).join("");
+  const display = (value) => Array.isArray(value) ? (value.length ? value.join(" · ") : "None") : (value == null || value === "" ? "Not specified" : String(value));
+  const fields = [
+    ["Deliverables", current?.deliverables || [], proposed?.deliverables || []],
+    ["Due date", formatDate(current?.dueDate), formatDate(proposed?.dueDate)],
+    ["Revision limit", current?.revisionLimit, proposed?.revisionLimit],
+    ["Total fee", current?.amountMinor == null ? null : formatMoney(current.amountMinor, current.currency), proposed?.amountMinor == null ? null : formatMoney(proposed.amountMinor, proposed.currency)],
+    ["Deposit", current?.depositMinor == null ? null : formatMoney(current.depositMinor, current.currency), proposed?.depositMinor == null ? null : formatMoney(proposed.depositMinor, proposed.currency)],
+    ["Currency", current?.currency, proposed?.currency],
+    ["Payment terms", current?.paymentTerms, proposed?.paymentTerms],
+    ["Completion / review", current?.completionCriteria, proposed?.completionCriteria]
+  ];
+  const changed = fields.filter(([, before, after]) => JSON.stringify(before) !== JSON.stringify(after));
+  if (!changed.length) return '<div class="diff-empty">No term-level differences were found.</div>';
+  return changed.map(([label, before, after]) => `<div class="diff-row diff-row-expanded"><span>${escapeHtml(label)}</span><strong><span class="diff-before">Before: ${escapeHtml(display(before))}</span><span class="diff-after">Proposed: ${escapeHtml(display(after))}</span></strong></div>`).join("");
 }
 
 function renderChangeCard(engagement, pending, current) {
@@ -162,10 +189,28 @@ function renderPayment(engagement, version) {
   </section>`;
 }
 
+function renderDeliveryProgress(engagement, version) {
+  if (!version || version.status !== "accepted") return "";
+  const items = (version.terms.deliverables || []).map((deliverable, index) => {
+    const status = getDeliverableProgress(engagement, version.id, index);
+    return `<li class="progress-item"><span class="progress-name">${escapeHtml(deliverable)}</span><label class="progress-control"><span class="sr-only">Progress for ${escapeHtml(deliverable)}</span><select data-progress data-version="${escapeHtml(version.id)}" data-index="${index}" aria-label="Progress for ${escapeHtml(deliverable)}"><option value="not_started" ${status === "not_started" ? "selected" : ""}>Not started</option><option value="in_progress" ${status === "in_progress" ? "selected" : ""}>In progress</option><option value="completed" ${status === "completed" ? "selected" : ""}>Completed</option></select></label></li>`;
+  }).join("");
+  return `<section class="detail-card"><div class="section-title-row"><div><h3>Delivery progress</h3><p>Track partial completion against the current accepted version. Updates are self-reported by the selected demo role.</p></div><span class="status-pill status-neutral">${(version.terms.deliverables || []).length} items</span></div><ul class="progress-list">${items || '<li class="empty-evidence">No deliverables are listed in this version.</li>'}</ul></section>`;
+}
+
 function renderEvidence(engagement) {
   const evidenceItems = engagement.evidence || [];
-  const rows = evidenceItems.length ? evidenceItems.map((item) => `<article class="evidence-item"><div class="evidence-item-head"><span class="reported-tag">Reported by ${escapeHtml(personName(engagement, item.actor))}</span><time class="reported-tag">${escapeHtml(formatTimestamp(item.at))}</time></div><p>${escapeHtml(item.description)}</p>${item.url ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.url)}</a>` : ""}</article>`).join("") : '<div class="empty-evidence">No evidence notes yet. Notes are self-reported, not verified.</div>';
-  return `<section class="detail-card"><div class="section-title-row"><div><h3>Evidence & delivery notes</h3><p>References are attributed to the person who added them.</p></div></div><div class="evidence-layout"><form id="evidenceForm" class="evidence-form"><label class="field">Add a note<textarea name="description" required maxlength="600" rows="3" placeholder="e.g. Shared first design draft for review"></textarea></label><label class="field">Optional link<input name="url" type="url" maxlength="500" placeholder="https://…"></label><button class="button button-outline button-small" type="submit">Add reported note <span aria-hidden="true">＋</span></button><span class="small-disclaimer">No file is uploaded. PACT does not verify delivery or quality.</span></form><div class="evidence-list">${rows}</div></div></section>`;
+  const rows = evidenceItems.length ? evidenceItems.map((item) => {
+    const attachment = item.attachment && /^data:(application\/pdf|image\/png|image\/jpeg|text\/plain|text\/csv|text\/markdown);base64,[A-Za-z0-9+/]*={0,2}$/i.test(item.attachment.dataUrl || "")
+      ? `<a class="attachment-link" href="${escapeHtml(item.attachment.dataUrl)}" download="${escapeHtml(item.attachment.name)}">Download ${escapeHtml(item.attachment.name)} · ${escapeHtml(formatBytes(item.attachment.size))}</a>` : "";
+    return `<article class="evidence-item"><div class="evidence-item-head"><span class="reported-tag">Reported by ${escapeHtml(personName(engagement, item.actor))}</span><time class="reported-tag">${escapeHtml(formatTimestamp(item.at))}</time></div><p>${escapeHtml(item.description)}</p>${item.url ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.url)}</a>` : ""}${attachment}</article>`;
+  }).join("") : '<div class="empty-evidence">No evidence notes yet. Notes are self-reported, not verified.</div>';
+  return `<section class="detail-card"><div class="section-title-row"><div><h3>Evidence & delivery notes</h3><p>References are attributed to the person who added them.</p></div></div><div class="evidence-layout"><form id="evidenceForm" class="evidence-form"><label class="field">Add a note<textarea name="description" required maxlength="600" rows="3" placeholder="e.g. Shared first design draft for review"></textarea></label><label class="field">Optional link<input name="url" type="url" maxlength="500" placeholder="https://…"></label><label class="field">Optional attachment <span class="field-hint">PDF, PNG, JPEG, TXT, CSV or Markdown · max 256 KiB</span><input name="attachment" type="file" accept=".pdf,.png,.jpg,.jpeg,.txt,.csv,.md,application/pdf,image/png,image/jpeg,text/plain,text/csv,text/markdown"></label><button class="button button-outline button-small" type="submit">Add reported note <span aria-hidden="true">＋</span></button><span class="small-disclaimer">Files remain in this browser-local demo and are included in exports. PACT does not upload or verify evidence.</span></form><div class="evidence-list">${rows}</div></div></section>`;
+}
+
+function formatBytes(bytes) {
+  if (!Number.isSafeInteger(bytes) || bytes < 0) return "size unavailable";
+  return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(0)} KiB`;
 }
 
 function renderActivity(engagement) {
@@ -190,7 +235,7 @@ function renderDetails() {
   const noCurrentNote = current ? "" : '<div class="no-accepted"><strong>No mutually accepted version yet.</strong> The draft below is not the current agreement. It only becomes current after the client explicitly accepts it.</div>';
   container.innerHTML = `
     <section class="detail-card">
-      <div class="detail-header"><div class="detail-heading"><span class="eyebrow">${statusPill(engagement)} <span class="version-dot">·</span> ${escapeHtml(role === "provider" ? "PROVIDER VIEW" : "CLIENT VIEW")}</span><h2>${escapeHtml(engagement.title)}</h2><p class="detail-sub">With ${escapeHtml(party)} · Created ${escapeHtml(formatDate(engagement.createdAt?.slice(0, 10)))}</p></div><div class="detail-actions"><button class="button button-outline button-small" type="button" data-open-change ${current ? "" : "disabled"}>Propose a change <span aria-hidden="true">＋</span></button></div></div>
+      <div class="detail-header"><div class="detail-heading"><span class="eyebrow">${statusPill(engagement)} <span class="version-dot">·</span> ${escapeHtml(role === "provider" ? "PROVIDER VIEW" : "CLIENT VIEW")}</span><h2>${escapeHtml(engagement.title)}</h2><p class="detail-sub">With ${escapeHtml(party)} · Created ${escapeHtml(formatDate(engagement.createdAt?.slice(0, 10)))}</p></div><div class="detail-actions"><button class="button button-outline button-small" type="button" data-export-selected>Export record</button><button class="button button-outline button-small" type="button" data-open-change ${current ? "" : "disabled"}>Propose a change <span aria-hidden="true">＋</span></button></div></div>
       <div class="version-strip"><span>Current terms</span><strong>${escapeHtml(reviewLabel)}</strong><span class="version-dot">·</span><span>${current ? `Accepted by ${escapeHtml(engagement.providerName)} and ${escapeHtml(engagement.clientName)}` : "Waiting for explicit client response"}</span></div>
       ${noCurrentNote}
       ${renderChangeCard(engagement, pending, current)}
@@ -198,6 +243,7 @@ function renderDetails() {
     <section class="detail-card"><div class="section-title-row"><div><h3>${current ? "Current agreed terms" : "Draft terms"}</h3><p>${current ? "The last version both parties explicitly accepted." : "Not current until both parties explicitly accept."}</p></div><span class="status-pill ${current ? "status-accepted" : "status-proposed"}">${escapeHtml(reviewLabel)}</span></div>
       <div class="terms-grid">${termValue("Deliverables", terms.deliverables, "▤", true)}${termValue("Due date", formatDate(terms.dueDate), "◷")}${termValue("Revision limit", terms.revisionLimit, "↺")}${termValue("Total fee", terms.amountMinor == null ? null : formatMoney(terms.amountMinor, terms.currency), "$", true)}${termValue("Payment terms", terms.paymentTerms, "⇄")}${termValue("Completion / review", terms.completionCriteria, "✓", true)}</div>
     </section>
+    ${renderDeliveryProgress(engagement, current)}
     ${renderPayment(engagement, current)}
     ${renderEvidence(engagement)}
     ${renderActivity(engagement)}`;
@@ -207,9 +253,110 @@ function renderStats() {
   const engagements = appState?.engagements || [];
   const pendingCount = engagements.filter((item) => pendingVersion(item)).length;
   const capturedMinor = engagements.reduce((sum, item) => sum + (item.payment?.status === "captured" ? (item.payment.amountMinor || 0) : 0), 0);
+  const obligations = deriveOutstandingObligations(engagements, role, new Date());
   $("#statAgreements").textContent = String(engagements.length);
   $("#statNeedsResponse").textContent = String(pendingCount);
   $("#statPayments").textContent = capturedMinor ? formatMoney(capturedMinor, "USD") : "$0";
+  $("#statObligations").textContent = String(obligations.length);
+}
+
+function renderObligations() {
+  const panel = $("#obligationsPanel");
+  const obligations = deriveOutstandingObligations(appState?.engagements || [], role, new Date());
+  const reminders = deriveReminders(appState?.engagements || [], role, new Date());
+  const rows = obligations.length ? obligations.map((item) => `<button class="obligation-row" type="button" data-select="${escapeHtml(item.engagementId)}" aria-label="Open ${escapeHtml(item.title)}: ${escapeHtml(item.summary)}"><span class="obligation-copy"><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.summary)}</span><small>${escapeHtml(item.detail)}</small></span><span class="obligation-kind ${item.type === "response" ? "kind-response" : "kind-delivery"}">${item.type === "response" ? "Response" : "Delivery"}</span></button>`).join("") : '<div class="obligations-empty">No open responses or unfinished deliverables. Nice work keeping the ledger current.</div>';
+  const reminderRows = reminders.length ? reminders.map((item) => `<button class="reminder-row" type="button" data-select="${escapeHtml(item.engagementId)}"><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.message)}</span></button>`).join("") : '<p class="reminders-empty">No response or deadline reminders are due now or within the next 7 days.</p>';
+  const permission = "Notification" in window ? Notification.permission : "unsupported";
+  const notificationButton = permission === "granted"
+    ? '<span class="notification-state">Browser reminders enabled</span>'
+    : permission === "denied"
+      ? '<button class="button button-outline button-small" type="button" id="enableReminderButton" disabled>Browser notifications blocked</button>'
+      : permission === "unsupported"
+        ? '<span class="small-disclaimer">Notifications unavailable in this browser.</span>'
+        : '<button class="button button-outline button-small" type="button" id="enableReminderButton">Enable browser reminders</button>';
+  panel.innerHTML = `<div class="obligations-header"><div><span class="eyebrow">KEEP THE NEXT STEP VISIBLE</span><h2 id="obligationsTitle">Outstanding obligations <span class="count-pill">${obligations.length}</span></h2><p>Responses and delivery progress across all agreements. These are reminders, not proof of performance.</p></div><div class="export-actions"><button class="button button-outline button-small" type="button" data-export-json>Export JSON backup</button><button class="button button-outline button-small" type="button" data-export-csv>Export CSV summary</button></div></div><div class="obligations-layout"><section class="obligation-column" aria-label="Outstanding work"><h3>Open items</h3><div class="obligation-list">${rows}</div></section><section class="reminder-column" aria-label="Upcoming reminders"><div class="reminder-heading"><div><h3>Due & response reminders</h3><p>Local to this browser; browser notifications only run while this app is open.</p></div>${notificationButton}</div><div class="reminder-list">${reminderRows}</div></section></div>`;
+}
+
+function safeExportEngagement(engagement) {
+  const copy = structuredClone(engagement);
+  if (copy.payment?.requestIds) delete copy.payment.requestIds;
+  return copy;
+}
+
+function downloadFile(filename, content, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.hidden = true;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function exportRecords(format, onlySelected = false) {
+  const engagements = (appState?.engagements || []).filter((item) => !onlySelected || item.id === selectedId).map(safeExportEngagement);
+  if (!engagements.length) return toast("There is no agreement record to export.", true);
+  const stamp = new Date().toISOString().slice(0, 10);
+  if (format === "json") {
+    const payload = { format: "PACT record export", version: 1, exportedAt: new Date().toISOString(), scope: onlySelected ? "selected agreement" : "all browser-local agreements", attachments: "Embedded data URLs; keep this file private.", engagements };
+    downloadFile(`pact-records-${stamp}.json`, `${JSON.stringify(payload, null, 2)}\n`, "application/json;charset=utf-8");
+    toast(`Exported ${engagements.length} record${engagements.length === 1 ? "" : "s"} as JSON.`);
+    return;
+  }
+  const headers = ["Agreement ID", "Project", "Provider", "Client", "Status", "Current version", "Due date", "Total fee", "Currency", "Deliverables complete", "Outstanding items", "Evidence notes"];
+  const csvCell = (value) => {
+    let text = String(value ?? "");
+    if (/^[\s\u0000-\u001f]*[=+\-@]/.test(text)) text = `'${text}`;
+    return `"${text.replaceAll('"', '""')}"`;
+  };
+  const lines = engagements.map((item) => {
+    const current = currentVersion(item);
+    const pending = pendingVersion(item);
+    const terms = current?.terms || item.versions.at(-1)?.terms || {};
+    const complete = current ? terms.deliverables.filter((_, index) => getDeliverableProgress(item, current.id, index) === "completed").length : 0;
+    const open = deriveOutstandingObligations([item], role, new Date()).map((obligation) => obligation.summary).join("; ");
+    const status = pending ? "awaiting response" : item.status || "draft";
+    return [item.id, item.title, item.providerName, item.clientName, status, current ? `Version ${current.number}` : "Not accepted", terms.dueDate || "", terms.amountMinor == null ? "" : (terms.amountMinor / 100).toFixed(2), terms.currency || "USD", current ? `${complete}/${terms.deliverables.length}` : "Not accepted", open, item.evidence?.length || 0].map(csvCell).join(",");
+  });
+  downloadFile(`pact-records-${stamp}.csv`, `\uFEFF${[headers.map(csvCell).join(","), ...lines].join("\r\n")}\r\n`, "text/csv;charset=utf-8");
+  toast(`Exported ${engagements.length} record${engagements.length === 1 ? "" : "s"} as CSV.`);
+}
+
+function sendBrowserReminders() {
+  if (!("Notification" in window) || Notification.permission !== "granted" || !appState) return;
+  const reminderKey = "pact-browser-reminders-seen.v1";
+  let seen = new Set();
+  try {
+    const saved = JSON.parse(localStorage.getItem(reminderKey) || "[]");
+    if (Array.isArray(saved)) seen = new Set(saved.filter((value) => typeof value === "string").slice(-200));
+  } catch {}
+  let changed = false;
+  for (const reminder of deriveReminders(appState.engagements, role, new Date())) {
+    if (seen.has(reminder.key)) continue;
+    try {
+      new Notification(`PACT · ${reminder.title}`, { body: reminder.message, tag: reminder.key });
+      seen.add(reminder.key);
+      changed = true;
+    } catch {}
+  }
+  if (changed) {
+    try { localStorage.setItem(reminderKey, JSON.stringify([...seen].slice(-200))); } catch {}
+  }
+}
+
+async function enableBrowserReminders() {
+  if (!("Notification" in window)) return toast("Browser notifications are not available here.", true);
+  try {
+    const permission = await Notification.requestPermission();
+    renderObligations();
+    if (permission === "granted") {
+      sendBrowserReminders();
+      toast("Browser reminders enabled. They work only while this app is open in this browser.");
+    } else toast("Browser reminder permission was not granted.");
+  } catch { toast("Browser notifications could not be enabled here.", true); }
 }
 
 async function refresh({ keepSelection = true } = {}) {
@@ -230,6 +377,8 @@ async function refresh({ keepSelection = true } = {}) {
   renderStats();
   renderList();
   renderDetails();
+  renderObligations();
+  sendBrowserReminders();
 }
 
 async function resetPublicDemo() {
@@ -237,6 +386,7 @@ async function resetPublicDemo() {
   if (!window.confirm("Reset this browser's demo data to the fictional sample? This affects only this browser.")) return;
   window.localStorage.removeItem(PUBLIC_DEMO_STORAGE_KEY);
   window.localStorage.removeItem("pact-demo-role");
+  window.localStorage.removeItem("pact-browser-reminders-seen.v1");
   role = "provider";
   selectedId = null;
   await refresh({ keepSelection: false });
@@ -300,6 +450,8 @@ function openChangeDialog() {
   $("#changeRevisionLimit").value = terms.revisionLimit || "";
   $("#changeTotalAmount").value = terms.amountMinor == null ? "" : (terms.amountMinor / 100).toFixed(2);
   $("#changeDepositAmount").value = terms.depositMinor == null ? "" : (terms.depositMinor / 100).toFixed(2);
+  $("#changePaymentTerms").value = terms.paymentTerms || "";
+  $("#changeCompletionCriteria").value = terms.completionCriteria || "";
   $("#changeSummary").value = "";
   $("#changeDialog").showModal();
 }
@@ -317,7 +469,9 @@ async function submitChange(event) {
         dueDate: $("#changeDueDate").value || null,
         revisionLimit: $("#changeRevisionLimit").value.trim() || null,
         amountMinor: toMinor($("#changeTotalAmount").value),
-        depositMinor: toMinor($("#changeDepositAmount").value), currency: "USD"
+        depositMinor: toMinor($("#changeDepositAmount").value), currency: "USD",
+        paymentTerms: $("#changePaymentTerms").value.trim() || null,
+        completionCriteria: $("#changeCompletionCriteria").value.trim() || null
       }
     };
     await api(`/api/engagements/${encodeURIComponent(selectedId)}/changes`, { method: "POST", body: JSON.stringify(body) });
@@ -351,16 +505,51 @@ async function respondToChange(button) {
 async function submitEvidence(event) {
   event.preventDefault();
   if (!selectedId) return;
-  const form = event.currentTarget;
+  const form = event.target;
   const formData = new FormData(form);
   try {
+    const file = formData.get("attachment");
+    let attachment = null;
+    if (file?.size) {
+      if (file.size > 256 * 1024) throw new Error("Each attachment is limited to 256 KiB.");
+      const extension = String(file.name.split(".").at(-1) || "").toLowerCase();
+      const typeByExtension = { pdf: "application/pdf", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", txt: "text/plain", csv: "text/csv", md: "text/markdown" };
+      const type = typeByExtension[extension];
+      if (!type || (file.type && file.type !== type && file.type !== "application/octet-stream")) {
+        throw new Error("Choose a PDF, PNG, JPEG, TXT, CSV, or Markdown file whose extension matches its type.");
+      }
+      attachment = { name: file.name, type, size: file.size, dataUrl: await fileToDataUrl(file) };
+    }
     await api(`/api/engagements/${encodeURIComponent(selectedId)}/evidence`, {
-      method: "POST", body: JSON.stringify({ role, description: formData.get("description"), url: formData.get("url") || null })
+      method: "POST", body: JSON.stringify({ role, description: formData.get("description"), url: formData.get("url") || null, attachment })
     });
     form.reset();
     await refresh();
     toast("Note added as self-reported. PACT has not verified the work.");
   } catch (error) { toast(error.message, true); }
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("The selected attachment could not be read."));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function updateProgress(select) {
+  try {
+    await api(`/api/engagements/${encodeURIComponent(selectedId)}/progress`, {
+      method: "POST",
+      body: JSON.stringify({ role, versionId: select.dataset.version, deliverableIndex: Number(select.dataset.index), status: select.value })
+    });
+    await refresh();
+    toast("Delivery progress updated as self-reported.");
+  } catch (error) {
+    await refresh();
+    toast(error.message, true);
+  }
 }
 
 function aiFieldName(field) {
@@ -494,6 +683,8 @@ function bindEvents() {
   $("#newAgreementForm").addEventListener("submit", submitNewAgreement);
   $("#changeForm").addEventListener("submit", submitChange);
   $("#extractButton").addEventListener("click", extractWithAI);
+  $("#agreementSearch").addEventListener("input", () => { renderList(); renderDetails(); });
+  $("#agreementStatusFilter").addEventListener("change", () => { renderList(); renderDetails(); });
   $("#roleSelect").addEventListener("change", async (event) => {
     role = event.target.value;
     localStorage.setItem("pact-demo-role", role);
@@ -503,6 +694,10 @@ function bindEvents() {
   document.addEventListener("click", async (event) => {
     const selectButton = event.target.closest("[data-select]");
     if (selectButton) { selectedId = selectButton.dataset.select; renderList(); renderDetails(); return; }
+    if (event.target.closest("[data-export-json]")) return exportRecords("json");
+    if (event.target.closest("[data-export-csv]")) return exportRecords("csv");
+    if (event.target.closest("[data-export-selected]")) return exportRecords("json", true);
+    if (event.target.closest("#enableReminderButton")) return enableBrowserReminders();
     if (event.target.closest("[data-open-new]")) return openNewAgreement();
     if (event.target.closest("[data-open-change]")) return openChangeDialog();
     const responseButton = event.target.closest("[data-respond]");
@@ -514,12 +709,17 @@ function bindEvents() {
   document.addEventListener("submit", (event) => {
     if (event.target?.id === "evidenceForm") { event.preventDefault(); submitEvidence(event); }
   });
+  document.addEventListener("change", (event) => {
+    if (event.target?.matches("[data-progress]")) updateProgress(event.target);
+  });
+  document.addEventListener("visibilitychange", sendBrowserReminders);
 }
 
 async function main() {
   bindEvents();
   try { await refresh({ keepSelection: false }); }
   catch (error) { $("#engagementDetails").innerHTML = `<div class="detail-card empty-detail"><h2>Workspace could not load</h2><p>${escapeHtml(error.message)}</p></div>`; }
+  window.setInterval(sendBrowserReminders, 15 * 60 * 1000);
 }
 
 main();

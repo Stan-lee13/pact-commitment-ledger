@@ -3,7 +3,8 @@ import {
   createEngagement,
   getEngagement,
   proposeChange,
-  respondToVersion
+  respondToVersion,
+  updateDeliverableProgress
 } from "./domain.mjs";
 
 export const PUBLIC_DEMO_STORAGE_KEY = "pact.public-demo.v1";
@@ -32,7 +33,17 @@ export function createLocalDemoApi({ initialState, storage = globalThis.localSto
     const operation = queue.then(() => {
       const state = readState();
       const result = mutator(state);
-      storage.setItem(key, JSON.stringify(state));
+      const serialized = JSON.stringify(state);
+      if (new TextEncoder().encode(serialized).byteLength > 4 * 1024 * 1024) {
+        throw error("Browser demo storage is full. Export your records and reduce attachment sizes before adding more.", 507);
+      }
+      try { storage.setItem(key, serialized); }
+      catch (cause) {
+        if (cause?.name === "QuotaExceededError" || cause?.code === 22) {
+          throw error("Browser demo storage is full. Export your records and reduce attachment sizes before adding more.", 507);
+        }
+        throw cause;
+      }
       return clone(result);
     });
     queue = operation.catch(() => undefined);
@@ -80,6 +91,11 @@ export function createLocalDemoApi({ initialState, storage = globalThis.localSto
     const evidenceMatch = pathname.match(/^\/api\/engagements\/([^/]+)\/evidence$/);
     if (method === "POST" && evidenceMatch) {
       return transact((state) => ({ evidence: addEvidence(state, decodeURIComponent(evidenceMatch[1]), body, body.role) }));
+    }
+
+    const progressMatch = pathname.match(/^\/api\/engagements\/([^/]+)\/progress$/);
+    if (method === "POST" && progressMatch) {
+      return transact((state) => ({ event: updateDeliverableProgress(state, decodeURIComponent(progressMatch[1]), body, body.role) }));
     }
 
     if (method === "POST" && pathname === "/api/ai/extract") {

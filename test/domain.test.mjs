@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createSeedState } from "../src/demo-data.mjs";
-import { createEngagement, proposeChange, respondToVersion } from "../src/domain.mjs";
+import { addEvidence, createEngagement, deriveOutstandingObligations, deriveReminders, getDeliverableProgress, proposeChange, respondToVersion, updateDeliverableProgress } from "../src/domain.mjs";
 
 const now = "2026-10-15T12:00:00.000Z";
 
@@ -34,12 +34,14 @@ test("proposing an amendment leaves the last mutually accepted version current",
   const engagement = state.engagements[0];
   const change = proposeChange(state, engagement.id, {
     baseVersionId: "demo-v1", changeSummary: "Add a page and move the date",
-    terms: { dueDate: "2026-11-24", amountMinor: 105000, depositMinor: 52500 }
+    terms: { dueDate: "2026-11-24", amountMinor: 105000, depositMinor: 52500, paymentTerms: "Three milestones", completionCriteria: "Written sign-off" }
   }, "provider", now);
   assert.equal(engagement.currentVersionId, "demo-v1");
   assert.equal(change.status, "proposed");
   assert.equal(change.acceptedBy[0], "provider");
   assert.equal(engagement.versions.find((version) => version.id === "demo-v1").terms.amountMinor, 85000);
+  assert.equal(change.terms.paymentTerms, "Three milestones");
+  assert.equal(change.terms.completionCriteria, "Written sign-off");
 });
 
 test("acceptance updates the current version; a later clarification does not", () => {
@@ -88,4 +90,74 @@ test("an unchanged proposal is rejected and silence creates no acceptance event"
   assert.equal(engagement.currentVersionId, "demo-v1");
   assert.equal(engagement.versions.length, 1);
   assert.equal(engagement.events.length, initialEventCount);
+});
+
+test("partial-delivery progress is tied to the current accepted version and keeps an auditable event", () => {
+  const state = acceptedState();
+  const engagement = state.engagements[0];
+  const event = updateDeliverableProgress(state, engagement.id, {
+    versionId: "demo-v1", deliverableIndex: 0, status: "in_progress"
+  }, "provider", now);
+  assert.equal(getDeliverableProgress(engagement, "demo-v1", 0), "in_progress");
+  assert.equal(event.actor, "provider");
+  assert.equal(event.status, "in_progress");
+  assert.throws(() => updateDeliverableProgress(state, engagement.id, {
+    versionId: "stale-version", deliverableIndex: 0, status: "completed"
+  }, "client", now), /outdated version/);
+  assert.throws(() => updateDeliverableProgress(state, engagement.id, {
+    versionId: "demo-v1", deliverableIndex: 0, status: "verified"
+  }, "client", now), /Progress must be/);
+  updateDeliverableProgress(state, engagement.id, { versionId: "demo-v1", deliverableIndex: 0, status: "completed" }, "client", now);
+  assert.equal(getDeliverableProgress(engagement, "demo-v1", 0), "completed");
+});
+
+test("reminders and outstanding obligations reflect response ownership, incomplete work, and due dates", () => {
+  const state = acceptedState();
+  const engagement = state.engagements[0];
+  const current = engagement.versions[0];
+  current.terms.dueDate = "2026-10-20";
+  updateDeliverableProgress(state, engagement.id, { versionId: current.id, deliverableIndex: 0, status: "completed" }, "provider", now);
+  const proposal = proposeChange(state, engagement.id, {
+    baseVersionId: current.id, changeSummary: "Add a delivery item", terms: { deliverables: [...current.terms.deliverables, "Final handoff"] }
+  }, "provider", now);
+  const obligations = deriveOutstandingObligations(state.engagements, "client", new Date(now));
+  assert.ok(obligations.some((item) => item.type === "response" && item.needsYou && item.versionId === proposal.id));
+  assert.ok(obligations.some((item) => item.type === "deliverable" && item.status === "not_started" && item.dueDate === "2026-10-20"));
+  const reminders = deriveReminders(state.engagements, "client", new Date(now));
+  assert.ok(reminders.some((item) => item.type === "response"));
+  assert.ok(reminders.some((item) => item.type === "due_soon" && /deliverable/.test(item.message)));
+  assert.equal(deriveReminders(state.engagements, "provider", new Date(now)).some((item) => item.type === "response"), false);
+});
+
+test("overdue reminders stop once all deliverables are marked complete", () => {
+  const state = acceptedState();
+  const engagement = state.engagements[0];
+  const current = engagement.versions[0];
+  current.terms.dueDate = "2026-10-14";
+  assert.equal(deriveReminders(state.engagements, "provider", new Date(now))[0].type, "overdue");
+  current.terms.deliverables.forEach((_, index) => updateDeliverableProgress(state, engagement.id, {
+    versionId: current.id, deliverableIndex: index, status: "completed"
+  }, "provider", now));
+  assert.equal(deriveReminders(state.engagements, "provider", new Date(now)).length, 0);
+});
+
+test("evidence attachments accept only bounded supported data and remain self-reported", () => {
+  const state = acceptedState();
+  const engagement = state.engagements[0];
+  const evidence = addEvidence(state, engagement.id, {
+    description: "Synthetic exported image", attachment: {
+      name: "preview.txt", type: "text/plain", size: 5, dataUrl: "data:text/plain;base64,SGVsbG8="
+    }
+  }, "provider", now);
+  assert.equal(evidence.attachment.name, "preview.txt");
+  assert.equal(evidence.status, "reported");
+  assert.throws(() => addEvidence(state, engagement.id, {
+    description: "Unsupported executable", attachment: { name: "script.svg", type: "image/svg+xml", size: 5, dataUrl: "data:image/svg+xml;base64,SGVsbG8=" }
+  }, "provider", now), /must be PDF, PNG, JPEG/);
+  assert.throws(() => addEvidence(state, engagement.id, {
+    description: "Mismatched bytes", attachment: { name: "notes.txt", type: "text/plain", size: 4, dataUrl: "data:text/plain;base64,SGVsbG8=" }
+  }, "provider", now), /size does not match/);
+  assert.throws(() => addEvidence(state, engagement.id, {
+    description: "Oversized file", attachment: { name: "large.txt", type: "text/plain", size: 256 * 1024 + 1, dataUrl: "data:text/plain;base64,SGVsbG8=" }
+  }, "provider", now), /between 1 byte and 256 KiB/);
 });

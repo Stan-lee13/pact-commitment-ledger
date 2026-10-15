@@ -10,6 +10,8 @@ The Vercel deployment is a **static, browser-local demo**. It uses fictional see
 
 Use **Reset this browser demo** in the workspace or clear this site's browser storage to restore the fictional seed. Browser-local storage is not a secure vault; this mode is for demonstration only.
 
+The demo includes full amendment comparisons, per-deliverable self-reported progress, an across-agreement outstanding-obligations view, search/status filters, JSON and CSV exports, and evidence notes with optional small attachments. Attachments are restricted to PDF/PNG/JPEG/TXT/CSV/Markdown, 256 KiB each and 1 MiB per agreement; they remain in local browser storage and are embedded in JSON exports. Optional browser notifications are derived from pending responses and due dates and run only while this page is open in this browser. There is no email, push service, or background scheduler.
+
 ## Run locally
 
 Requirements: Node.js 22 or newer; no runtime dependencies.
@@ -29,9 +31,12 @@ Optional local AI uses Ollama on the same computer. Candidate terms are suggesti
 ## What the prototype demonstrates
 
 - An initial draft does not become current until the client explicitly accepts it.
-- Amendments are versioned. The previous accepted version remains current until the other party explicitly accepts a proposed change.
+- Amendments are versioned and compared field by field. The previous accepted version remains current until the other party explicitly accepts a proposed change.
 - Rejection and clarification are explicit states; silence is never consent.
-- Delivery/evidence notes are attributed and labelled self-reported, not verified.
+- Delivery progress can be tracked per deliverable; evidence notes and optional small attachments are attributed and labelled self-reported, not verified.
+- Multiple agreements can be searched, filtered by status, and reviewed together in an outstanding-obligations view.
+- Agreement records can be exported as JSON backups (including attachment data) or CSV summaries.
+- Optional due-date and response reminders are browser-local; notifications require opt-in and work only while the page is open.
 - The displayed agreement, any payment reference, and reported work status remain separate.
 - PayPal support, when enabled locally, uses Sandbox Orders v2 and calculates the amount on the server. A standard Sandbox capture goes to the configured test merchant, **not** the service provider. It is not escrow, a payout, or proof of delivery.
 

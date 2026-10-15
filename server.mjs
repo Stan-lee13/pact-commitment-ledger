@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { FileStore } from "./src/store.mjs";
-import { DomainError, addEvidence, createEngagement, getCurrentVersion, getEngagement, proposeChange, respondToVersion } from "./src/domain.mjs";
+import { DomainError, addEvidence, createEngagement, getCurrentVersion, getEngagement, proposeChange, respondToVersion, updateDeliverableProgress } from "./src/domain.mjs";
 import { AIUnavailableError, extractTerms } from "./src/ai.mjs";
 import { PayPalError, PayPalSandbox, verifyCaptureAgainstExpected } from "./src/paypal.mjs";
 
@@ -106,9 +106,16 @@ export async function createAppServer({ store: suppliedStore, paypal: suppliedPa
 
         const evidenceMatch = pathname.match(/^\/api\/engagements\/([^/]+)\/evidence$/);
         if (req.method === "POST" && evidenceMatch) {
-          const body = await readJson(req);
+          const body = await readJson(req, 700 * 1024);
           const evidence = await store.transact((state) => addEvidence(state, decodeURIComponent(evidenceMatch[1]), body, body.role));
           return sendJson(res, 201, { evidence });
+        }
+
+        const progressMatch = pathname.match(/^\/api\/engagements\/([^/]+)\/progress$/);
+        if (req.method === "POST" && progressMatch) {
+          const body = await readJson(req);
+          const event = await store.transact((state) => updateDeliverableProgress(state, decodeURIComponent(progressMatch[1]), body, body.role));
+          return sendJson(res, 200, { event });
         }
 
         if (req.method === "POST" && pathname === "/api/ai/extract") {

@@ -25,13 +25,24 @@ flowchart LR
     P6 -->|reconcile before safe retry| P4
   end
 
+  subgraph D[Delivery progress — self-reported per accepted version]
+    direction TB
+    D0[Not started] -->|party records progress| D1[In progress]
+    D1 -->|party records completion| D2[Completed]
+    D2 -. later correction is another event .-> D1
+    D1 -. can be reset by a new accepted version .-> D0
+  end
+
   Separation[Agreement acceptance does not capture payment<br/>Payment capture does not prove delivery or quality]
   A5 -. no automatic payment transition .-> Separation
   P5 -. no automatic fulfilment transition .-> Separation
+  D2 -. does not mean verified or accepted .-> Separation
 
   classDef pending fill:#fff5e6,stroke:#c88c4e,color:#634721
   classDef accepted fill:#edf8f1,stroke:#63896c,color:#173d34
   classDef terminal fill:#eef4ff,stroke:#5574a4,color:#223653
+  classDef delivery fill:#f5f7ef,stroke:#879b6a,color:#3d4d30
   class A1,A4,A3,P2,P4,P6 pending
   class A2,A5 accepted
   class P3,P5 terminal
+  class D0,D1,D2 delivery
