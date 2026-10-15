@@ -1,0 +1,65 @@
+flowchart LR
+  person[Provider or client] -->|browser interaction| ui
+
+  subgraph current[Current working prototype]
+    subgraph browser[Browser UI]
+      ui[Responsive PACT workspace]
+      roles[Provider/client demo-role switcher]
+      sdk[PayPal JavaScript SDK v6 Sandbox session]
+      ui --- roles
+      ui -. optional checkout .-> sdk
+    end
+
+    subgraph server[Node.js 22 single-process server]
+      api[HTTP API and security headers]
+      domain[Deterministic agreement state machine]
+      store[Atomic local JSON file store]
+      paypal[Server-only PayPal Sandbox adapter]
+      extract[AI extraction route and quote validator]
+      api --> domain --> store
+      api --> paypal
+      api --> extract
+    end
+
+    subgraph local[Same computer]
+      ollama[Ollama local model]
+    end
+
+    subgraph paypal_sandbox[PayPal Sandbox]
+      rest[Orders v2 create and capture]
+      buyer[Sandbox buyer approval]
+      merchant[Configured Sandbox merchant account]
+    end
+
+    ui <-->|JSON API; demo data only| api
+    extract -->|selected source text; not persisted| ollama
+    ollama -->|candidate terms| extract
+    sdk -->|order ID| api
+    paypal -->|OAuth; server amount; idempotency key| rest
+    rest --> buyer --> rest
+    rest -->|test capture only| merchant
+    paypal -->|verified matching capture| store
+  end
+
+  subgraph not_yet[Not implemented; production gates]
+    auth[Authentication and party-scoped authorization]
+    invite[Expiring invite links and consent]
+    db[Managed relational database]
+    webhook[HTTPS webhook signature verification and deduplication]
+    export[Export, deletion, retention controls]
+    partner[PayPal platform approval and seller onboarding]
+  end
+
+  api -. requires .-> auth
+  api -. migrate .-> db
+  rest -. asynchronous lifecycle events .-> webhook
+  domain -. add .-> invite
+  store -. migrate .-> export
+  partner -. required for production marketplace payouts .-> rest
+
+  classDef active fill:#edf8f1,stroke:#63896c,color:#173d34,stroke-width:1.5px
+  classDef external fill:#eef4ff,stroke:#5574a4,color:#223653,stroke-width:1.5px
+  classDef missing fill:#fff4e8,stroke:#c88c4e,color:#634721,stroke-dasharray:5 4
+  class ui,roles,api,domain,store,paypal,extract,ollama active
+  class sdk,rest,buyer,merchant external
+  class auth,invite,db,webhook,export,partner missing

@@ -1,0 +1,119 @@
+erDiagram
+  USER ||--o{ ENGAGEMENT_PARTY : participates
+  ENGAGEMENT ||--|{ ENGAGEMENT_PARTY : has_parties
+  ENGAGEMENT ||--|{ AGREEMENT_VERSION : versions
+  AGREEMENT_VERSION ||--o{ RESPONSE : receives
+  USER ||--o{ RESPONSE : records
+  ENGAGEMENT ||--o{ OBLIGATION : tracks
+  AGREEMENT_VERSION ||--o{ OBLIGATION : defines
+  ENGAGEMENT ||--o{ EVIDENCE_REFERENCE : records
+  USER ||--o{ EVIDENCE_REFERENCE : reports
+  ENGAGEMENT ||--o{ PAYMENT : associates
+  AGREEMENT_VERSION ||--o{ PAYMENT : prices
+  PAYMENT ||--o{ PAYMENT_EVENT : receives
+  ENGAGEMENT ||--o{ AUDIT_EVENT : logs
+  USER ||--o{ AUDIT_EVENT : acts
+  AGREEMENT_VERSION ||--o{ AI_CANDIDATE : drafts
+  USER ||--o{ AI_CANDIDATE : reviews
+  ENGAGEMENT ||--o{ COUNTERPARTY_INVITE : shares
+
+  USER {
+    uuid id PK
+    string email_hash
+    datetime created_at
+  }
+  ENGAGEMENT {
+    uuid id PK
+    string title
+    string status
+    uuid current_version_id FK
+    datetime created_at
+  }
+  ENGAGEMENT_PARTY {
+    uuid id PK
+    uuid engagement_id FK
+    uuid user_id FK
+    string role
+    datetime consented_at
+  }
+  COUNTERPARTY_INVITE {
+    uuid id PK
+    uuid engagement_id FK
+    string token_hash
+    string scope
+    datetime expires_at
+    datetime revoked_at
+  }
+  AGREEMENT_VERSION {
+    uuid id PK
+    uuid engagement_id FK
+    uuid base_version_id FK
+    int version_number
+    string status
+    json terms
+    uuid proposed_by FK
+    datetime created_at
+    datetime accepted_at
+  }
+  RESPONSE {
+    uuid id PK
+    uuid version_id FK
+    uuid user_id FK
+    string action
+    string comment
+    datetime acted_at
+  }
+  OBLIGATION {
+    uuid id PK
+    uuid engagement_id FK
+    uuid version_id FK
+    uuid responsible_party_id FK
+    string description
+    date due_date
+    string status
+  }
+  EVIDENCE_REFERENCE {
+    uuid id PK
+    uuid engagement_id FK
+    uuid actor_id FK
+    string uri
+    string claim_type
+    string verification_level
+    datetime created_at
+  }
+  PAYMENT {
+    uuid id PK
+    uuid engagement_id FK
+    uuid version_id FK
+    string provider
+    string order_id
+    string capture_id
+    int amount_minor
+    string currency
+    string status
+    datetime verified_at
+  }
+  PAYMENT_EVENT {
+    uuid id PK
+    uuid payment_id FK
+    string provider_event_id
+    bool signature_verified
+    datetime processed_at
+  }
+  AI_CANDIDATE {
+    uuid id PK
+    uuid version_id FK
+    uuid reviewer_id FK
+    string field
+    string source_quote
+    string candidate_value
+    string disposition
+  }
+  AUDIT_EVENT {
+    uuid id PK
+    uuid engagement_id FK
+    uuid actor_id FK
+    string event_type
+    json payload
+    datetime server_timestamp
+  }

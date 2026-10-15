@@ -1,0 +1,14 @@
+{
+  "name": "pact-commitment-ledger",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Synthetic-data demo for clear service agreements and versioned changes",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test",
+    "check": "node --check server.mjs && node --check scripts/build.mjs && node --check src/demo-data.mjs && node --check src/store.mjs && node --check src/domain.mjs && node --check src/ai.mjs && node --check src/paypal.mjs && node --check public/app.js && node --check public/local-demo.mjs",
+    "build": "node scripts/build.mjs"
+  }
+}

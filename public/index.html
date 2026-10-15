@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#173d34">
+  <title>PACT — Shared work, clear agreements</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="PACT home">
+      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M7 8.5h8.5a5.5 5.5 0 0 1 0 11H7zm0 0v15M25 23.5h-8.5a5.5 5.5 0 0 1 0-11H25z" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      <span>PACT<span class="brand-dot">.</span></span>
+    </a>
+    <nav class="top-nav" aria-label="Main navigation">
+      <a class="nav-active" href="#workspace">Workspace</a>
+      <a href="#how-it-works">How it works</a>
+    </nav>
+    <div class="top-actions">
+      <label class="role-switch-label" for="roleSelect">View as</label>
+      <select id="roleSelect" class="role-select" aria-label="Switch demo role">
+        <option value="provider">Provider</option>
+        <option value="client">Client</option>
+      </select>
+      <button id="newAgreementButton" class="button button-dark" type="button"><span aria-hidden="true">＋</span> New agreement</button>
+    </div>
+  </header>
+
+  <main class="page-shell" id="workspace">
+    <div class="demo-banner" role="note">
+      <span class="demo-pulse" aria-hidden="true"></span>
+      <span id="demoBannerText"><strong>Prototype mode.</strong> Sample names and terms are fictional. Do not enter real client, contract, or payment details.</span>
+      <span class="demo-banner-end">Not legal advice · No escrow</span>
+    </div>
+
+    <section class="hero-panel">
+      <div class="hero-copy">
+        <div class="eyebrow eyebrow-light"><span class="eyebrow-line"></span> Work, made clearer</div>
+        <h1>Good work starts<br><em>with a clear pact.</em></h1>
+        <p>One shared place for what was agreed, what changed, what’s due, and what each person has reported.</p>
+        <div class="hero-actions">
+          <button class="button button-lime" id="heroNewButton" type="button">Create an agreement <span aria-hidden="true">↗</span></button>
+          <a class="hero-link" href="#how-it-works">See how PACT works <span aria-hidden="true">↓</span></a>
+        </div>
+      </div>
+      <div class="hero-art" aria-hidden="true">
+        <div class="art-orbit orbit-one"></div><div class="art-orbit orbit-two"></div>
+        <div class="art-card art-card-back"><span class="art-check">✓</span><span class="art-lines"><i></i><i></i><i></i></span></div>
+        <div class="art-card art-card-front"><span class="art-label">VERSION 02</span><span class="art-title">A change, clearly agreed.</span><span class="art-status"><span></span> Waiting for a response</span></div>
+        <div class="art-spark spark-one">✳</div><div class="art-spark spark-two">·</div>
+      </div>
+    </section>
+
+    <section class="stats-row" aria-label="Workspace summary">
+      <div class="stat-card"><span class="stat-label">Agreements</span><strong id="statAgreements">—</strong><span class="stat-foot">in this demo workspace</span><span class="stat-icon icon-leaf" aria-hidden="true">↗</span></div>
+      <div class="stat-card"><span class="stat-label">Needs a response</span><strong id="statNeedsResponse">—</strong><span class="stat-foot">explicit action only</span><span class="stat-icon icon-coral" aria-hidden="true">⌁</span></div>
+      <div class="stat-card"><span class="stat-label">Sandbox payments</span><strong id="statPayments">$0</strong><span class="stat-foot">no real money processed</span><span class="stat-icon icon-sand" aria-hidden="true">◌</span></div>
+    </section>
+
+    <section class="workspace-grid">
+      <aside class="sidebar-column" aria-label="Agreement list">
+        <div class="section-heading"><div><span class="eyebrow">YOUR WORKSPACE</span><h2>Agreements <span id="agreementCount" class="count-pill">0</span></h2></div><button id="smallNewButton" class="icon-button" type="button" aria-label="Create agreement">＋</button></div>
+        <div id="engagementList" class="agreement-list card-shell"></div>
+        <div class="principle-card" id="how-it-works">
+          <div class="principle-icon" aria-hidden="true">✳</div>
+          <span class="eyebrow">THE PACT PRINCIPLE</span>
+          <h3>Payment is not proof of delivery.</h3>
+          <p>Agreement, payment, and work status stay separate. A note is reported by a person—not verified by the app.</p>
+        </div>
+        <div class="privacy-note"><span class="lock-icon" aria-hidden="true">⌑</span><span><strong id="storageLabel">Local prototype</strong><br><small id="storageNote">Records stay in this workspace file.</small></span></div>
+        <div class="demo-reset-wrap"><button id="resetDemoButton" class="button button-plain button-small" type="button" hidden>Reset this browser demo</button></div>
+      </aside>
+
+      <section id="engagementDetails" class="detail-column" aria-live="polite" aria-label="Selected agreement"></section>
+    </section>
+    <footer class="page-footer"><span>PACT <span class="brand-dot">.</span> Shared commitments, not a verdict.</span><span id="footerSafety">Prototype · Do not use with real client data</span></footer>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <dialog id="newAgreementDialog" class="dialog-card">
+    <form id="newAgreementForm" method="dialog" class="dialog-form">
+      <div class="dialog-head"><div><span class="eyebrow">START WITH THE BASICS</span><h2>New agreement</h2><p>These are draft terms. The other party must explicitly accept them.</p></div><button class="icon-button close-dialog" type="button" aria-label="Close">×</button></div>
+      <div class="form-grid">
+        <label class="field field-wide">Project name<input id="newTitle" name="title" required maxlength="120" placeholder="e.g. Brand identity · Phase 1"></label>
+        <label class="field">Your name<input id="providerName" name="providerName" required maxlength="80" placeholder="Provider"></label>
+        <label class="field">Client name<input id="clientName" name="clientName" required maxlength="80" placeholder="Client"></label>
+        <label class="field field-wide">Deliverables <span class="field-hint">One item per line</span><textarea id="deliverables" name="deliverables" required rows="3" placeholder="Responsive landing page&#10;Two rounds of revisions"></textarea></label>
+        <label class="field">Due date<input id="dueDate" name="dueDate" type="date"></label>
+        <label class="field">Revision limit<input id="revisionLimit" name="revisionLimit" maxlength="160" placeholder="e.g. 2 rounds"></label>
+        <label class="field">Total fee <span class="field-hint">USD · optional</span><input id="totalAmount" name="totalAmount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="850.00"></label>
+        <label class="field">Initial deposit <span class="field-hint">USD · optional</span><input id="depositAmount" name="depositAmount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="425.00"></label>
+        <label class="field field-wide">Payment terms<input id="paymentTerms" name="paymentTerms" maxlength="600" placeholder="e.g. 50% to start; balance after final approval"></label>
+        <label class="field field-wide">Completion / review criteria<input id="completionCriteria" name="completionCriteria" maxlength="600" placeholder="What should the client review or respond to?"></label>
+      </div>
+      <details class="ai-disclosure">
+        <summary><span class="ai-sparkle" aria-hidden="true">✳</span><span><strong>Draft suggestions from source text</strong><small>Optional · Local AI · review every quote</small></span><span class="local-chip">LOCAL</span></summary>
+        <div class="ai-body">
+          <label class="field">Paste a short note or selected message<textarea id="sourceText" rows="4" maxlength="15000" placeholder="Paste only the source text you want analyzed. Do not paste sensitive or real client data in this prototype."></textarea></label>
+          <div class="ai-toolbar"><button id="extractButton" class="button button-outline" type="button">Extract suggestions <span aria-hidden="true">↗</span></button><span class="ai-local-note">Ollama on this computer · not sent to a paid AI API</span></div>
+          <div id="aiResults" class="ai-results" aria-live="polite"></div>
+        </div>
+      </details>
+      <div class="dialog-foot"><span class="quiet-note">No real invite is sent in this prototype.</span><div><button class="button button-plain cancel-dialog" type="button">Cancel</button><button class="button button-dark" type="submit">Send draft terms <span aria-hidden="true">↗</span></button></div></div>
+    </form>
+  </dialog>
+
+  <dialog id="changeDialog" class="dialog-card">
+    <form id="changeForm" method="dialog" class="dialog-form">
+      <div class="dialog-head"><div><span class="eyebrow">VERSIONED CHANGE</span><h2>Propose a change</h2><p>The current accepted version stays in force until both parties accept this one.</p></div><button class="icon-button close-dialog" type="button" aria-label="Close">×</button></div>
+      <div class="form-grid">
+        <label class="field field-wide">What is changing?<input id="changeSummary" maxlength="240" required placeholder="e.g. Add a case-study page and move delivery by 3 days"></label>
+        <label class="field field-wide">Deliverables <span class="field-hint">One item per line</span><textarea id="changeDeliverables" rows="3"></textarea></label>
+        <label class="field">New due date<input id="changeDueDate" type="date"></label>
+        <label class="field">Revision limit<input id="changeRevisionLimit" maxlength="160"></label>
+        <label class="field">New total fee <span class="field-hint">USD</span><input id="changeTotalAmount" type="number" min="0" step="0.01" inputmode="decimal"></label>
+        <label class="field">New deposit <span class="field-hint">USD</span><input id="changeDepositAmount" type="number" min="0" step="0.01" inputmode="decimal"></label>
+      </div>
+      <div class="consent-callout"><span aria-hidden="true">✓</span><span>By sending, you confirm that this exact version reflects your proposal. It will not replace the current terms unless the other party explicitly accepts.</span></div>
+      <div class="dialog-foot"><span class="quiet-note">A proposal is not an acceptance by the other party.</span><div><button class="button button-plain cancel-dialog" type="button">Cancel</button><button class="button button-dark" type="submit">Send change proposal <span aria-hidden="true">↗</span></button></div></div>
+    </form>
+  </dialog>
+</body>
+</html>

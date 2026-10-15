@@ -1,0 +1,37 @@
+flowchart LR
+  subgraph A[Agreement state — acceptance is explicit]
+    direction TB
+    A0((Start)) --> A1[Awaiting client response]
+    A1 -->|client accepts v1| A2[Accepted current version]
+    A1 -->|client rejects v1| A3[Needs revision]
+    A3 -->|provider revises and resends| A1
+    A2 -->|either party proposes a change| A4[Change pending]
+    A4 -->|other party rejects| A2
+    A4 -->|other party asks clarification| A2
+    A4 -->|other party explicitly accepts| A5[New version becomes current]
+    A5 -->|later change proposed| A4
+  end
+
+  subgraph P[Payment state — independent from agreement]
+    direction TB
+    P0((Start)) --> P1[Not started]
+    P1 -->|client starts checkout| P2[Creating Sandbox order]
+    P2 -->|server stores order ID| P3[Created]
+    P2 -->|timeout or uncertain result| P6[Unknown; reconcile]
+    P3 -->|buyer approves; server capture| P4[Capturing]
+    P3 -->|buyer cancels| P3
+    P4 -->|completed and exact amount/currency match| P5[Captured to Sandbox merchant]
+    P4 -->|timeout or mismatch| P6
+    P6 -->|reconcile before safe retry| P4
+  end
+
+  Separation[Agreement acceptance does not capture payment<br/>Payment capture does not prove delivery or quality]
+  A5 -. no automatic payment transition .-> Separation
+  P5 -. no automatic fulfilment transition .-> Separation
+
+  classDef pending fill:#fff5e6,stroke:#c88c4e,color:#634721
+  classDef accepted fill:#edf8f1,stroke:#63896c,color:#173d34
+  classDef terminal fill:#eef4ff,stroke:#5574a4,color:#223653
+  class A1,A4,A3,P2,P4,P6 pending
+  class A2,A5 accepted
+  class P3,P5 terminal
