@@ -4,6 +4,8 @@ PACT is a hackathon prototype for recording service-work terms, versioned change
 
 ## Public demo
 
+**Live demo:** [Open PACT on Vercel](https://pact-commitment-ledger.vercel.app)
+
 The Vercel deployment is a **static, browser-local demo**. It uses fictional seed records and stores each visitor's changes in that visitor's browser `localStorage`; visitors do not share records. There are no user accounts, cloud synchronization, server-side writes, live payments, or public AI calls. AI extraction and PayPal Sandbox are intentionally disabled on the hosted demo. Do not enter real names, contract terms, messages, or payment data.
 
 Use **Reset this browser demo** in the workspace or clear this site's browser storage to restore the fictional seed. Browser-local storage is not a secure vault; this mode is for demonstration only.
