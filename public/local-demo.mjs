@@ -5,6 +5,7 @@ import {
   getCurrentVersion,
   getEngagement,
   proposeChange,
+  recordDeliveryReview,
   respondToVersion,
   updateDeliverableProgress
 } from "./domain.mjs";
@@ -263,6 +264,11 @@ export function createLocalDemoApi({
     const progressMatch = pathname.match(/^\/api\/engagements\/([^/]+)\/progress$/);
     if (method === "POST" && progressMatch) {
       return transact((state) => ({ event: updateDeliverableProgress(state, decodeURIComponent(progressMatch[1]), body, body.role) }));
+    }
+
+    const reviewMatch = pathname.match(/^\/api\/engagements\/([^/]+)\/review$/);
+    if (method === "POST" && reviewMatch) {
+      return transact((state) => ({ event: recordDeliveryReview(state, decodeURIComponent(reviewMatch[1]), body, body.role) }));
     }
 
     if (method === "POST" && pathname === "/api/ai/extract") {

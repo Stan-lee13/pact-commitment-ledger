@@ -104,6 +104,8 @@
       <details class="ai-disclosure">
         <summary><span class="ai-sparkle" aria-hidden="true">✳</span><span><strong>Draft suggestions from source text</strong><small>Optional · source-quoted Qwen3 suggestions · human review required</small></span><span class="local-chip">AI</span></summary>
         <div class="ai-body">
+          <label class="field">Import source text <span class="field-hint">TXT, CSV, or Markdown · max 15 KB · read in this browser</span><input id="sourceFile" type="file" accept=".txt,.csv,.md,text/plain,text/csv,text/markdown" aria-label="Import source text file" aria-describedby="sourceFileNote"></label>
+          <span id="sourceFileNote" class="small-disclaimer">The file is loaded into the editor locally. It is sent to the temporary model only after you choose Extract suggestions.</span>
           <label class="field">Paste a short fictional note or selected message<textarea id="sourceText" rows="4" maxlength="15000" placeholder="Use fictional text only. The selected text is sent to a temporary Ollama service for this request; do not paste real client data."></textarea></label>
           <div class="ai-toolbar"><button id="extractButton" class="button button-outline" type="button">Extract suggestions <span aria-hidden="true">↗</span></button><span class="ai-local-note">Temporary Ollama service · fictional text only</span></div>
           <div id="aiResults" class="ai-results" aria-live="polite"></div>

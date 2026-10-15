@@ -49,6 +49,10 @@ test("API keeps agreement and payment states separate and ignores client-supplie
       role: "provider", versionId: engagement.versions[0].id, deliverableIndex: 0, status: "in_progress"
     });
     assert.equal(progressResponse.status, 200);
+    const reviewResponse = await jsonPost(`${base}/api/engagements/${engagement.id}/review`, {
+      role: "client", versionId: engagement.versions[0].id, action: "accept"
+    });
+    assert.equal(reviewResponse.status, 200);
     const evidenceResponse = await jsonPost(`${base}/api/engagements/${engagement.id}/evidence`, {
       role: "client", description: "Synthetic attached preview", attachment: {
         name: "preview.txt", type: "text/plain", size: 5, dataUrl: "data:text/plain;base64,SGVsbG8="
@@ -84,6 +88,7 @@ test("API keeps agreement and payment states separate and ignores client-supplie
     assert.equal(saved.currentVersionId, engagement.versions[0].id);
     assert.equal(saved.payment.requestIds, undefined);
     assert.equal(saved.events.find((event) => event.type === "deliverable_progress_updated")?.status, "in_progress");
+    assert.equal(saved.events.find((event) => event.type === "delivery_review_recorded")?.reviewAction, "accept");
     assert.equal(saved.evidence[0].attachment.name, "preview.txt");
     assert.ok(saved.events.some((event) => /not a provider payout/.test(event.label)));
   } finally {

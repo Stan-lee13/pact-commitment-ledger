@@ -74,6 +74,23 @@ test("browser demo records partial completion, bounded attachments, and multiple
   assert.ok(state.engagements.some((item) => item.id === second.engagement.id));
 });
 
+test("browser demo stores a client delivery review without changing agreement or payment state", async () => {
+  const { api } = createHarness();
+  const result = await post(api, "/api/engagements/demo-pact-01/review", {
+    role: "client", versionId: "demo-v1", action: "changes_requested", comment: "Please adjust the final handoff label."
+  });
+  assert.equal(result.event.reviewAction, "changes_requested");
+  const state = await api("/api/state");
+  const engagement = state.engagements[0];
+  assert.equal(engagement.currentVersionId, "demo-v1");
+  assert.equal(engagement.status, "accepted");
+  assert.equal(engagement.payment.status, "not_started");
+  assert.equal(engagement.events.at(-1).type, "delivery_review_recorded");
+  await assert.rejects(post(api, "/api/engagements/demo-pact-01/review", {
+    role: "provider", versionId: "demo-v1", action: "accept"
+  }), /Only the client/);
+});
+
 test("browser demo reports local storage quota errors without losing state silently", async () => {
   const storage = {
     getItem: () => null,
@@ -194,10 +211,14 @@ test("static build is reproducible and excludes server, store, and environment f
   assert.match(html, /name="pact-public-demo" content="true"/);
   assert.match(html, /id="obligationsPanel"/);
   assert.match(html, /id="agreementSearch"/);
+  assert.match(html, /id="sourceFile"/);
+  assert.match(html, /aria-label="Import source text file"/);
   const app = await readFile(path.join(root, "dist", "app.js"), "utf8");
   assert.match(app, /Export JSON backup/);
   assert.match(app, /sendBrowserReminders/);
   assert.match(app, /data-progress/);
+  assert.match(app, /data-delivery-review/);
+  assert.match(app, /importSourceFile/);
   assert.match(app, /PayPal Sandbox/);
   assert.equal(app.includes("clientId"), false);
   assert.equal(app.includes("PAYPAL_CLIENT_ID"), false);

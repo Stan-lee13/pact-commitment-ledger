@@ -12,11 +12,11 @@ Use **Reset this browser demo** in the workspace or clear this site's browser st
 
 ## Quick judge walkthrough
 
-1. **AI:** Open **New Agreement**, paste a fictional source note, and select **Extract suggestions**. Each suggestion stays a draft with a visible source quote; review and apply it yourself. Only the selected text is sent to the temporary Ollama bridge.
-2. **Agreement flow:** Switch between Provider and Client demo roles, accept the seed draft, propose a change, inspect the version diff, and explicitly accept, clarify, or reject. Then try delivery progress, evidence notes, outstanding obligations, browser reminders, JSON/CSV export, and safe deletion of an unpaid record.
+1. **AI:** Open **New Agreement**, paste or import a fictional TXT/CSV/Markdown source note, and select **Extract suggestions**. Imports are read in this browser; only after you click Extract is the selected text sent to the temporary Ollama bridge. Each suggestion stays a draft with a visible source quote; review and apply it yourself.
+2. **Agreement flow:** Switch between Provider and Client demo roles, accept the seed draft, propose a change, inspect the version diff, and explicitly accept, clarify, or reject. Then try delivery progress, evidence notes, the separate client delivery-review actions (accept, request in-scope changes, or ask for delivery clarification), outstanding obligations, browser reminders, JSON/CSV export, and safe deletion of an unpaid record.
 3. **PayPal:** Open the seed agreement with its accepted version, switch to Client, and select **Continue to PayPal Sandbox**. PayPal shows the test amount on its hosted approval page; after a Sandbox buyer approves, PACT returns and captures/verifies the order server-side. Use a Sandbox buyer account you control; there is no buyer login in this repository. No live-money checkout is available.
 
-The demo includes full amendment comparisons, per-deliverable self-reported progress, an across-agreement outstanding-obligations view, search/status filters, JSON and CSV exports, safe deletion of unpaid browser-local records, and evidence notes with optional small attachments. Attachments are restricted to PDF/PNG/JPEG/TXT/CSV/Markdown, 256 KiB each and 1 MiB per agreement; they remain in local browser storage and are embedded in JSON exports. Optional browser notifications are derived from pending responses and due dates and run only while this page is open in this browser. There is no email, push service, or background scheduler.
+The demo includes full amendment comparisons, per-deliverable self-reported progress, explicit client delivery review, an across-agreement outstanding-obligations view, search/status filters, JSON and CSV exports, safe deletion of unpaid browser-local records, and evidence notes with optional small attachments. Delivery review is a separate self-reported event; it does not change agreement terms, verify fulfilment, or trigger payment. AI source import accepts plain-text TXT/CSV/Markdown up to 15 KB; files are read in the browser and are not sent until you click **Extract suggestions**. Evidence attachments are restricted to PDF/PNG/JPEG/TXT/CSV/Markdown, 256 KiB each and 1 MiB per agreement; they remain in local browser storage and are embedded in JSON exports. Optional browser notifications are derived from pending responses and due dates and run only while this page is open in this browser. There is no email, push service, or background scheduler.
 
 ## Run locally
 
@@ -41,7 +41,8 @@ The public AI route is enabled only while the temporary Ollama bridge is reachab
 - An initial draft does not become current until the client explicitly accepts it.
 - Amendments are versioned and compared field by field. The previous accepted version remains current until the other party explicitly accepts a proposed change.
 - Rejection and clarification are explicit states; silence is never consent.
-- Delivery progress can be tracked per deliverable; evidence notes and optional small attachments are attributed and labelled self-reported, not verified.
+- Delivery progress can be tracked per deliverable; the client can separately accept delivery, request an in-scope correction, or ask for clarification. These are self-reported review events, not verification, and do not change agreement or payment status.
+- Evidence notes and optional small attachments are attributed and labelled self-reported, not verified.
 - Multiple agreements can be searched, filtered by status, and reviewed together in an outstanding-obligations view.
 - Agreement records can be exported as JSON backups (including attachment data) or CSV summaries.
 - Optional due-date and response reminders are browser-local; notifications require opt-in and work only while the page is open.

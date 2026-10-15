@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { FileStore } from "./src/store.mjs";
-import { DomainError, addEvidence, createEngagement, deleteEngagement, getCurrentVersion, getEngagement, proposeChange, respondToVersion, updateDeliverableProgress } from "./src/domain.mjs";
+import { DomainError, addEvidence, createEngagement, deleteEngagement, getCurrentVersion, getEngagement, proposeChange, recordDeliveryReview, respondToVersion, updateDeliverableProgress } from "./src/domain.mjs";
 import { AIUnavailableError, extractTerms } from "./src/ai.mjs";
 import { getSandboxApprovalUrl, PayPalError, PayPalSandbox, verifyCaptureAgainstExpected } from "./src/paypal.mjs";
 
@@ -145,6 +145,13 @@ export async function createAppServer({ store: suppliedStore, paypal: suppliedPa
         if (req.method === "POST" && progressMatch) {
           const body = await readJson(req);
           const event = await store.transact((state) => updateDeliverableProgress(state, decodeURIComponent(progressMatch[1]), body, body.role));
+          return sendJson(res, 200, { event });
+        }
+
+        const reviewMatch = pathname.match(/^\/api\/engagements\/([^/]+)\/review$/);
+        if (req.method === "POST" && reviewMatch) {
+          const body = await readJson(req);
+          const event = await store.transact((state) => recordDeliveryReview(state, decodeURIComponent(reviewMatch[1]), body, body.role));
           return sendJson(res, 200, { event });
         }
 

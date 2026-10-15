@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createSeedState } from "../src/demo-data.mjs";
-import { addEvidence, createEngagement, deleteEngagement, deriveOutstandingObligations, deriveReminders, getDeliverableProgress, proposeChange, respondToVersion, updateDeliverableProgress } from "../src/domain.mjs";
+import { addEvidence, createEngagement, deleteEngagement, deriveOutstandingObligations, deriveReminders, getDeliverableProgress, getDeliveryReview, proposeChange, recordDeliveryReview, respondToVersion, updateDeliverableProgress } from "../src/domain.mjs";
 
 const now = "2026-10-15T12:00:00.000Z";
 
@@ -109,6 +109,24 @@ test("partial-delivery progress is tied to the current accepted version and keep
   }, "client", now), /Progress must be/);
   updateDeliverableProgress(state, engagement.id, { versionId: "demo-v1", deliverableIndex: 0, status: "completed" }, "client", now);
   assert.equal(getDeliverableProgress(engagement, "demo-v1", 0), "completed");
+});
+
+test("client delivery review is explicit, current-version scoped, and separate from agreement acceptance", () => {
+  const state = acceptedState();
+  const engagement = state.engagements[0];
+  const event = recordDeliveryReview(state, engagement.id, { versionId: "demo-v1", action: "accept" }, "client", now);
+  assert.equal(event.type, "delivery_review_recorded");
+  assert.equal(event.actor, "client");
+  assert.equal(event.reviewAction, "accept");
+  assert.equal(getDeliveryReview(engagement, "demo-v1").id, event.id);
+  assert.equal(engagement.currentVersionId, "demo-v1");
+  assert.equal(engagement.status, "accepted");
+  assert.throws(() => recordDeliveryReview(state, engagement.id, { versionId: "demo-v1", action: "accept" }, "provider", now), /Only the client/);
+  assert.throws(() => recordDeliveryReview(state, engagement.id, { versionId: "stale-version", action: "accept" }, "client", now), /outdated version/);
+  assert.throws(() => recordDeliveryReview(state, engagement.id, { versionId: "demo-v1", action: "changes_requested" }, "client", now), /Add a short note/);
+  const clarification = recordDeliveryReview(state, engagement.id, { versionId: "demo-v1", action: "clarification", comment: "Which file format should the handoff use?" }, "client", now);
+  assert.equal(getDeliveryReview(engagement, "demo-v1").id, clarification.id);
+  assert.equal(clarification.reviewAction, "clarification");
 });
 
 test("reminders and outstanding obligations reflect response ownership, incomplete work, and due dates", () => {

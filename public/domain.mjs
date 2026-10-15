@@ -261,6 +261,37 @@ export function updateDeliverableProgress(state, engagementId, input, actorRole,
   return engagement.events.at(-1);
 }
 
+const deliveryReviewActions = new Set(["accept", "changes_requested", "clarification"]);
+
+export function getDeliveryReview(engagement, versionId = getCurrentVersion(engagement)?.id) {
+  if (!versionId) return null;
+  return [...(engagement.events ?? [])].reverse().find((event) =>
+    event.type === "delivery_review_recorded" && event.versionId === versionId
+  ) ?? null;
+}
+
+export function recordDeliveryReview(state, engagementId, input, actorRole, at = new Date().toISOString()) {
+  assertRole(actorRole);
+  if (actorRole !== "client") throw new DomainError("Only the client can record a delivery review.", 403);
+  const engagement = getEngagement(state, engagementId);
+  const current = getCurrentVersion(engagement);
+  if (!current || current.status !== "accepted") throw new DomainError("A mutually accepted version is required before reviewing delivery.", 409);
+  if (input.versionId !== current.id) throw new DomainError("This delivery review is based on an outdated version. Refresh and try again.", 409);
+  if (!deliveryReviewActions.has(input.action)) throw new DomainError("Choose accept, request changes, or ask for clarification.");
+  const comment = String(input.comment ?? "").trim();
+  if (comment.length > 1200) throw new DomainError("Review notes must be 1,200 characters or less.");
+  if (input.action !== "accept" && !comment) throw new DomainError("Add a short note for a change request or clarification.");
+  const label = input.action === "accept"
+    ? `${engagement.clientName} marked delivery accepted for version ${current.number}. This is a client-reported review, not verified fulfilment.`
+    : input.action === "changes_requested"
+      ? `${engagement.clientName} requested changes to delivery within version ${current.number}: ${comment}`
+      : `${engagement.clientName} asked for delivery clarification on version ${current.number}: ${comment}`;
+  addEvent(engagement, "delivery_review_recorded", actorRole, at, label, {
+    versionId: current.id, reviewAction: input.action, comment
+  });
+  return engagement.events.at(-1);
+}
+
 function daysUntil(dateValue, now) {
   if (!dateValue) return null;
   const today = new Date(now);

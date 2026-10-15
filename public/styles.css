@@ -260,6 +260,16 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .progress-item { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 11px; border: 1px solid #eaede7; border-radius: 10px; background: #fff; }
 .progress-name { color: #405249; font-size: 10px; line-height: 1.45; }
 .progress-control select { min-width: 125px; padding: 8px 24px 8px 9px; border: 1px solid #dfe5dc; border-radius: 8px; background: #fbfcf9; color: var(--ink); font-size: 9px; font-weight: 700; }
+.delivery-review { margin-top: 14px; padding: 13px; border: 1px solid #e1e9d6; border-radius: 11px; background: #f8fbf3; }
+.delivery-review-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.delivery-review-head h4 { margin: 0; color: #35513f; font-size: 12px; }
+.delivery-review-state { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; padding: 10px; border: 1px solid #e7ece2; border-radius: 9px; background: #fff; }
+.review-meta { color: #859087; font-size: 8px; }
+.delivery-review-state p { flex-basis: 100%; margin: 2px 0 0; color: #526157; font-size: 9px; line-height: 1.5; }
+.delivery-review-empty { margin-top: 10px; color: #78857b; font-size: 9px; }
+.delivery-review > .small-disclaimer { display: block; margin-top: 9px; }
+.review-actions { margin-top: 10px; }
+.review-role-note { margin: 10px 0 0; }
 .diff-row-expanded { align-items: start; flex-direction: column; gap: 5px; }
 .diff-row-expanded strong { width: 100%; display: flex; flex-direction: column; gap: 4px; text-align: left; overflow-wrap: anywhere; }
 .diff-before { color: #9a6e61; font-weight: 600; }.diff-after { color: #3c6f4b; font-weight: 700; }

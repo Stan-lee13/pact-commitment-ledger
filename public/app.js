@@ -1,5 +1,5 @@
 import { createLocalDemoApi, PUBLIC_DEMO_STORAGE_KEY } from "./local-demo.mjs";
-import { deriveOutstandingObligations, deriveReminders, getDeliverableProgress } from "./domain.mjs";
+import { deriveOutstandingObligations, deriveReminders, getDeliverableProgress, getDeliveryReview } from "./domain.mjs";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -198,7 +198,19 @@ function renderDeliveryProgress(engagement, version) {
     const status = getDeliverableProgress(engagement, version.id, index);
     return `<li class="progress-item"><span class="progress-name">${escapeHtml(deliverable)}</span><label class="progress-control"><span class="sr-only">Progress for ${escapeHtml(deliverable)}</span><select data-progress data-version="${escapeHtml(version.id)}" data-index="${index}" aria-label="Progress for ${escapeHtml(deliverable)}"><option value="not_started" ${status === "not_started" ? "selected" : ""}>Not started</option><option value="in_progress" ${status === "in_progress" ? "selected" : ""}>In progress</option><option value="completed" ${status === "completed" ? "selected" : ""}>Completed</option></select></label></li>`;
   }).join("");
-  return `<section class="detail-card"><div class="section-title-row"><div><h3>Delivery progress</h3><p>Track partial completion against the current accepted version. Updates are self-reported by the selected demo role.</p></div><span class="status-pill status-neutral">${(version.terms.deliverables || []).length} items</span></div><ul class="progress-list">${items || '<li class="empty-evidence">No deliverables are listed in this version.</li>'}</ul></section>`;
+  return `<section class="detail-card"><div class="section-title-row"><div><h3>Delivery progress</h3><p>Track partial completion against the current accepted version. Updates are self-reported by the selected demo role.</p></div><span class="status-pill status-neutral">${(version.terms.deliverables || []).length} items</span></div><ul class="progress-list">${items || '<li class="empty-evidence">No deliverables are listed in this version.</li>'}</ul>${renderDeliveryReview(engagement, version)}</section>`;
+}
+
+function renderDeliveryReview(engagement, version) {
+  const review = getDeliveryReview(engagement, version.id);
+  const labels = { accept: "Delivery accepted", changes_requested: "Changes requested", clarification: "Clarification requested" };
+  const state = review
+    ? `<div class="delivery-review-state"><span class="status-pill ${review.reviewAction === "accept" ? "status-accepted" : "status-proposed"}">${escapeHtml(labels[review.reviewAction] || "Review recorded")}</span><span class="review-meta">Reported by ${escapeHtml(personName(engagement, review.actor))} · ${escapeHtml(formatTimestamp(review.at))}</span>${review.comment ? `<p>${escapeHtml(review.comment)}</p>` : ""}</div>`
+    : '<div class="delivery-review-empty">No client delivery decision has been recorded for this accepted version.</div>';
+  const controls = role === "client"
+    ? `<div class="change-actions review-actions"><button type="button" class="button button-small button-accept" data-delivery-review="accept" data-version="${escapeHtml(version.id)}">Accept delivery</button><button type="button" class="button button-small button-clarify" data-delivery-review="changes_requested" data-version="${escapeHtml(version.id)}">Request changes</button><button type="button" class="button button-small button-outline" data-delivery-review="clarification" data-version="${escapeHtml(version.id)}">Ask for delivery clarification</button></div>`
+    : '<p class="small-disclaimer review-role-note">Switch to the Client demo role to record a client review. The role switch is a simulator, not authentication.</p>';
+  return `<div class="delivery-review"><div class="delivery-review-head"><h4>Client delivery review</h4><span class="small-disclaimer">Separate from agreement and payment</span></div>${state}<p class="small-disclaimer">This is a client-reported decision, not verified fulfilment. Requests here stay within accepted scope; use a version change for scope, fee, or due-date changes.</p>${controls}</div>`;
 }
 
 function renderEvidence(engagement) {
@@ -218,8 +230,8 @@ function formatBytes(bytes) {
 
 function renderActivity(engagement) {
   const events = [...(engagement.events || [])].sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, 6);
-  const icon = (type) => type.includes("accept") ? "✓" : type.includes("change") ? "↗" : type.includes("payment") ? "$" : type.includes("evidence") ? "▤" : "·";
-  return `<section class="detail-card"><div class="section-title-row"><div><h3>Activity</h3><p>Timestamped actions, not a legal conclusion.</p></div><span class="status-pill status-neutral">${events.length} recent</span></div><ol class="activity-list">${events.map((event) => `<li class="activity-item"><span class="activity-marker" aria-hidden="true">${icon(event.type)}</span><span class="activity-text">${escapeHtml(event.label)}<time class="activity-meta">${escapeHtml(formatTimestamp(event.at))}</time></span></li>`).join("")}</ol></section>`;
+  const icon = (event) => event.type.includes("accept") || event.reviewAction === "accept" ? "✓" : event.type.includes("change") || event.reviewAction === "changes_requested" ? "↗" : event.reviewAction === "clarification" ? "?" : event.type.includes("payment") ? "$" : event.type.includes("evidence") ? "▤" : "·";
+  return `<section class="detail-card"><div class="section-title-row"><div><h3>Activity</h3><p>Timestamped actions, not a legal conclusion.</p></div><span class="status-pill status-neutral">${events.length} recent</span></div><ol class="activity-list">${events.map((event) => `<li class="activity-item"><span class="activity-marker" aria-hidden="true">${icon(event)}</span><span class="activity-text">${escapeHtml(event.label)}<time class="activity-meta">${escapeHtml(formatTimestamp(event.at))}</time></span></li>`).join("")}</ol></section>`;
 }
 
 function renderDetails() {
@@ -375,6 +387,7 @@ async function refresh({ keepSelection = true } = {}) {
     $("#storageNote").textContent = "Data stays in this browser; it is not shared across people or devices.";
     $("#footerSafety").textContent = "Synthetic-data demo · No accounts or cloud sync · PayPal Sandbox only · AI service may be temporary";
     $("#sourceText").disabled = !aiEnabled;
+    $("#sourceFile").disabled = !aiEnabled;
     $("#extractButton").disabled = !aiEnabled;
     $(".ai-local-note").textContent = aiEnabled
       ? `Qwen3 4B · temporary local-model service · selected text is sent for this request only`
@@ -562,6 +575,30 @@ function fileToDataUrl(file) {
   });
 }
 
+async function importSourceFile(event) {
+  const file = event.currentTarget.files?.[0];
+  if (!file) return;
+  const extension = String(file.name.split(".").at(-1) || "").toLowerCase();
+  if (!["txt", "csv", "md"].includes(extension) || (file.type && !file.type.startsWith("text/") && file.type !== "application/octet-stream")) {
+    event.currentTarget.value = "";
+    return toast("Choose a plain-text TXT, CSV, or Markdown source file.", true);
+  }
+  if (file.size > 15_000) {
+    event.currentTarget.value = "";
+    return toast("Source files are limited to 15 KB so the selected text fits the demo AI request.", true);
+  }
+  try {
+    const text = await file.text();
+    if (!text.trim() || text.includes("\0") || text.length > 15_000 || new TextEncoder().encode(text).byteLength > 15_000) {
+      throw new Error("Choose a non-empty text file that fits the 15 KB source limit.");
+    }
+    $("#sourceText").value = text;
+    toast(`Loaded ${file.name} into the browser. Nothing is sent until you click Extract suggestions.`);
+  } catch (error) {
+    toast(error.message || "The selected source file could not be read.", true);
+  }
+}
+
 async function updateProgress(select) {
   try {
     await api(`/api/engagements/${encodeURIComponent(selectedId)}/progress`, {
@@ -574,6 +611,28 @@ async function updateProgress(select) {
     await refresh();
     toast(error.message, true);
   }
+}
+
+async function respondToDeliveryReview(button) {
+  const action = button.dataset.deliveryReview;
+  const versionId = button.dataset.version;
+  let comment = "";
+  if (action === "accept") {
+    if (!window.confirm("Record that the client accepts delivery for this exact version? This does not change the agreement terms or payment state.")) return;
+  } else {
+    const prompt = action === "changes_requested"
+      ? "What should be changed within the accepted scope? For a change to scope, fee, or due date, propose a version amendment instead."
+      : "What needs clarification about the delivered work?";
+    comment = window.prompt(prompt) || "";
+    if (!comment.trim()) return;
+  }
+  try {
+    await api(`/api/engagements/${encodeURIComponent(selectedId)}/review`, {
+      method: "POST", body: JSON.stringify({ role, versionId, action, comment })
+    });
+    await refresh();
+    toast(action === "accept" ? "Client delivery review recorded. Agreement and payment states are unchanged." : action === "changes_requested" ? "In-scope delivery changes recorded as a client report." : "Delivery clarification request recorded.");
+  } catch (error) { toast(error.message, true); }
 }
 
 function aiFieldName(field) {
@@ -625,7 +684,8 @@ function applyAiSuggestions() {
 async function extractWithAI() {
   const sourceText = $("#sourceText").value.trim();
   const button = $("#extractButton");
-  if (!sourceText) return toast("Paste a short source note first.", true);
+  if (!sourceText) return toast("Paste or import a short fictional source note first.", true);
+  if (new TextEncoder().encode(sourceText).byteLength > 15_000) return toast("The selected source text must fit the 15 KB request limit.", true);
   button.disabled = true;
   button.textContent = "Analyzing selected text…";
   $("#aiResults").innerHTML = '<div class="ai-empty">Checking the selected source text and returned quotes…</div>';
@@ -711,6 +771,7 @@ function bindEvents() {
   $("#newAgreementForm").addEventListener("submit", submitNewAgreement);
   $("#changeForm").addEventListener("submit", submitChange);
   $("#extractButton").addEventListener("click", extractWithAI);
+  $("#sourceFile").addEventListener("change", importSourceFile);
   $("#agreementSearch").addEventListener("input", () => { renderList(); renderDetails(); });
   $("#agreementStatusFilter").addEventListener("change", () => { renderList(); renderDetails(); });
   $("#roleSelect").addEventListener("change", async (event) => {
@@ -731,6 +792,8 @@ function bindEvents() {
     if (event.target.closest("[data-delete-selected]")) return deleteSelectedAgreement();
     const responseButton = event.target.closest("[data-respond]");
     if (responseButton) return respondToChange(responseButton);
+    const deliveryReviewButton = event.target.closest("[data-delivery-review]");
+    if (deliveryReviewButton) return respondToDeliveryReview(deliveryReviewButton);
     if (event.target.closest("#paypalCheckout")) return beginPayPalCheckout();
     const close = event.target.closest(".close-dialog, .cancel-dialog");
     if (close) close.closest("dialog")?.close();
