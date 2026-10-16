@@ -32,6 +32,7 @@ export function createLocalDemoApi({
   const config = {
     publicDemo: true,
     storage: "browser_local",
+    sharedStorageAvailable: Boolean(publicConfig.sharedStorageAvailable),
     ai: publicConfig.ai ?? disabledConfig.ai,
     paypal: publicConfig.paypal ?? disabledConfig.paypal
   };

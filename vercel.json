@@ -6,7 +6,8 @@
   "installCommand": "npm install --ignore-scripts",
   "functions": {
     "api/ai/extract.js": { "maxDuration": 120 },
-    "api/paypal/*.js": { "maxDuration": 30 }
+    "api/paypal/*.js": { "maxDuration": 30 },
+    "api/shared.js": { "maxDuration": 30 }
   },
   "headers": [
     {

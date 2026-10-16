@@ -5,6 +5,7 @@ const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]);
 const isPublicStaticBuild = document.querySelector('meta[name="pact-public-demo"]')?.content === "true";
+const sharedInviteToken = new URLSearchParams(window.location.hash.slice(1)).get("invite") || "";
 
 let appState = null;
 let selectedId = null;
@@ -28,8 +29,31 @@ async function startPublicDemo() {
 }
 
 async function api(path, options = {}) {
+  if (sharedInviteToken && path !== "/api/ai/extract") {
+    if (path.startsWith("/api/paypal")) throw new Error("PayPal is disabled in shared demo mode.");
+    let body = {};
+    if (options.body) {
+      try { body = typeof options.body === "string" ? JSON.parse(options.body) : options.body; }
+      catch { throw new Error("Request body must be valid JSON."); }
+    }
+    let response;
+    try {
+      response = await fetch("/api/shared", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ action: "request", token: sharedInviteToken, path, method: options.method || "GET", body })
+      });
+    } catch {
+      throw new Error("Shared D1 storage could not be reached. Your demo record remains stored; retry shortly.");
+    }
+    let payload = {};
+    try { payload = await response.json(); } catch {}
+    if (!response.ok) throw new Error(payload.error || `Request failed (${response.status}).`);
+    return payload;
+  }
   if (localDemoApi) return localDemoApi(path, options);
-  if (isPublicStaticBuild) return (await startPublicDemo())(path, options);
+  if (isPublicStaticBuild && !(sharedInviteToken && path === "/api/ai/extract")) return (await startPublicDemo())(path, options);
   let response;
   try {
     response = await fetch(path, {
@@ -220,7 +244,10 @@ function renderEvidence(engagement) {
       ? `<a class="attachment-link" href="${escapeHtml(item.attachment.dataUrl)}" download="${escapeHtml(item.attachment.name)}">Download ${escapeHtml(item.attachment.name)} · ${escapeHtml(formatBytes(item.attachment.size))}</a>` : "";
     return `<article class="evidence-item"><div class="evidence-item-head"><span class="reported-tag">Reported by ${escapeHtml(personName(engagement, item.actor))}</span><time class="reported-tag">${escapeHtml(formatTimestamp(item.at))}</time></div><p>${escapeHtml(item.description)}</p>${item.url ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.url)}</a>` : ""}${attachment}</article>`;
   }).join("") : '<div class="empty-evidence">No evidence notes yet. Notes are self-reported, not verified.</div>';
-  return `<section class="detail-card"><div class="section-title-row"><div><h3>Evidence & delivery notes</h3><p>References are attributed to the person who added them.</p></div></div><div class="evidence-layout"><form id="evidenceForm" class="evidence-form"><label class="field">Add a note<textarea name="description" required maxlength="600" rows="3" placeholder="e.g. Shared first design draft for review"></textarea></label><label class="field">Optional link<input name="url" type="url" maxlength="500" placeholder="https://…"></label><label class="field">Optional attachment <span class="field-hint">PDF, PNG, JPEG, TXT, CSV or Markdown · max 256 KiB</span><input name="attachment" type="file" accept=".pdf,.png,.jpg,.jpeg,.txt,.csv,.md,application/pdf,image/png,image/jpeg,text/plain,text/csv,text/markdown"></label><button class="button button-outline button-small" type="submit">Add reported note <span aria-hidden="true">＋</span></button><span class="small-disclaimer">Files remain in this browser-local demo and are included in exports. PACT does not upload or verify evidence.</span></form><div class="evidence-list">${rows}</div></div></section>`;
+  const attachmentStorageNote = appState?.config?.storage === "shared_d1"
+    ? "Fictional notes and attachments are saved with this shared demo record in D1. PACT does not upload or verify evidence."
+    : "Files remain in this browser-local demo and are included in exports. PACT does not upload or verify evidence.";
+  return `<section class="detail-card"><div class="section-title-row"><div><h3>Evidence & delivery notes</h3><p>References are attributed to the person who added them.</p></div></div><div class="evidence-layout"><form id="evidenceForm" class="evidence-form"><label class="field">Add a note<textarea name="description" required maxlength="600" rows="3" placeholder="e.g. Shared first design draft for review"></textarea></label><label class="field">Optional link<input name="url" type="url" maxlength="500" placeholder="https://…"></label><label class="field">Optional attachment <span class="field-hint">PDF, PNG, JPEG, TXT, CSV or Markdown · max 256 KiB</span><input name="attachment" type="file" accept=".pdf,.png,.jpg,.jpeg,.txt,.csv,.md,application/pdf,image/png,image/jpeg,text/plain,text/csv,text/markdown"></label><button class="button button-outline button-small" type="submit">Add reported note <span aria-hidden="true">＋</span></button><span class="small-disclaimer">${attachmentStorageNote}</span></form><div class="evidence-list">${rows}</div></div></section>`;
 }
 
 function formatBytes(bytes) {
@@ -245,13 +272,15 @@ function renderDetails() {
   const pending = pendingVersion(engagement);
   const displayVersion = current || pending || engagement.versions.at(-1);
   const hasSandboxOrder = Boolean(engagement.payment?.orderId || engagement.payment?.captureId);
+  const sharedMode = appState?.config?.storage === "shared_d1";
+  const canShareSample = !sharedMode && appState?.config?.sharedStorageAvailable && engagement.id === "demo-pact-01";
   const party = role === "provider" ? engagement.clientName : engagement.providerName;
   const reviewLabel = current ? versionNumber(engagement, current) : "Draft · not yet mutually accepted";
   const terms = displayVersion?.terms || {};
   const noCurrentNote = current ? "" : '<div class="no-accepted"><strong>No mutually accepted version yet.</strong> The draft below is not the current agreement. It only becomes current after the client explicitly accepts it.</div>';
   container.innerHTML = `
     <section class="detail-card">
-      <div class="detail-header"><div class="detail-heading"><span class="eyebrow">${statusPill(engagement)} <span class="version-dot">·</span> ${escapeHtml(role === "provider" ? "PROVIDER VIEW" : "CLIENT VIEW")}</span><h2>${escapeHtml(engagement.title)}</h2><p class="detail-sub">With ${escapeHtml(party)} · Created ${escapeHtml(formatDate(engagement.createdAt?.slice(0, 10)))}</p></div><div class="detail-actions"><button class="button button-outline button-small" type="button" data-export-selected>Export record</button><button class="button button-outline button-small" type="button" data-open-change ${current ? "" : "disabled"}>Propose a change <span aria-hidden="true">＋</span></button>${role === "provider" ? `<button class="button button-plain button-small" type="button" data-delete-selected ${hasSandboxOrder ? 'disabled title="Keep this record because it has a Sandbox order or capture."' : ""}>Delete local record</button>` : ""}</div></div>
+      <div class="detail-header"><div class="detail-heading"><span class="eyebrow">${statusPill(engagement)} <span class="version-dot">·</span> ${escapeHtml(role === "provider" ? "PROVIDER VIEW" : "CLIENT VIEW")}</span><h2>${escapeHtml(engagement.title)}</h2><p class="detail-sub">With ${escapeHtml(party)} · Created ${escapeHtml(formatDate(engagement.createdAt?.slice(0, 10)))}</p></div><div class="detail-actions"><button class="button button-outline button-small" type="button" data-export-selected>Export record</button>${canShareSample ? '<button class="button button-outline button-small" type="button" data-share-selected>Share fictional sample</button>' : ""}<button class="button button-outline button-small" type="button" data-open-change ${current ? "" : "disabled"}>Propose a change <span aria-hidden="true">＋</span></button>${role === "provider" && !sharedMode ? `<button class="button button-plain button-small" type="button" data-delete-selected ${hasSandboxOrder ? 'disabled title="Keep this record because it has a Sandbox order or capture."' : ""}>Delete local record</button>` : ""}</div></div>
       <div class="version-strip"><span>Current terms</span><strong>${escapeHtml(reviewLabel)}</strong><span class="version-dot">·</span><span>${current ? `Accepted by ${escapeHtml(engagement.providerName)} and ${escapeHtml(engagement.clientName)}` : "Waiting for explicit client response"}</span></div>
       ${noCurrentNote}
       ${renderChangeCard(engagement, pending, current)}
@@ -379,13 +408,23 @@ async function enableBrowserReminders() {
 async function refresh({ keepSelection = true } = {}) {
   appState = await api("/api/state");
   const publicDemo = Boolean(appState.config?.publicDemo);
+  const sharedMode = appState.config?.storage === "shared_d1";
+  if (sharedMode && ["provider", "client"].includes(appState.config.sharedRole)) role = appState.config.sharedRole;
   if (publicDemo) {
     const aiEnabled = Boolean(appState.config?.ai?.enabled);
-    const paypalEnabled = Boolean(appState.config?.paypal?.configured);
-    $("#demoBannerText").innerHTML = `<strong>Public demo mode.</strong> Records stay in this browser. ${aiEnabled ? "AI sends selected text to a temporary local-model service." : "AI service is currently unavailable."} ${paypalEnabled ? "PayPal uses Sandbox only." : "PayPal Sandbox is currently unavailable."} Use fictional data only; never enter real client, contract, or payment details.`;
-    $("#storageLabel").textContent = "Browser-local demo";
-    $("#storageNote").textContent = "Data stays in this browser; it is not shared across people or devices.";
-    $("#footerSafety").textContent = "Synthetic-data demo · No accounts or cloud sync · PayPal Sandbox only · AI service may be temporary";
+    const paypalEnabled = !sharedMode && Boolean(appState.config?.paypal?.configured);
+    if (sharedMode) {
+      const expiry = appState.config.inviteExpiresAt ? formatTimestamp(appState.config.inviteExpiresAt) : "in 30 days";
+      $("#demoBannerText").innerHTML = `<strong>Public shared demo.</strong> This fictional sample is stored in shared D1. This link is fixed to the ${escapeHtml(role)} role, limited to one demo agreement, and expires ${escapeHtml(expiry)}. Anyone with the link can use it. Never enter real data; this is not authentication, a private portal, legal advice, or proof of enforceability.`;
+      $("#storageLabel").textContent = "Shared D1 demo";
+      $("#storageNote").textContent = "One fictional sample record is shared through this role-scoped invite for 30 days.";
+      $("#footerSafety").textContent = "Public prototype · Fictional data only · No authentication or legal enforceability · Payments disabled";
+    } else {
+      $("#demoBannerText").innerHTML = `<strong>Public demo mode.</strong> Records stay in this browser. ${aiEnabled ? "AI sends selected text to a temporary local-model service." : "AI service is currently unavailable."} ${paypalEnabled ? "PayPal uses Sandbox only." : "PayPal Sandbox is currently unavailable."} Use fictional data only; never enter real client, contract, or payment details.`;
+      $("#storageLabel").textContent = "Browser-local demo";
+      $("#storageNote").textContent = "Data stays in this browser; it is not shared across people or devices.";
+      $("#footerSafety").textContent = "Synthetic-data demo · No accounts or cloud sync · PayPal Sandbox only · AI service may be temporary";
+    }
     $("#sourceText").disabled = !aiEnabled;
     $("#sourceFile").disabled = !aiEnabled;
     $("#extractButton").disabled = !aiEnabled;
@@ -393,9 +432,12 @@ async function refresh({ keepSelection = true } = {}) {
       ? `Qwen3 4B · temporary local-model service · selected text is sent for this request only`
       : "AI service is temporarily unavailable · enter terms manually";
     const status = $("#integrationStatus");
-    if (status) status.innerHTML = `<div class="integration-item"><span class="integration-chip">AI</span><div><strong>Source-quoted term suggestions</strong><span>${aiEnabled ? `Enabled · ${escapeHtml(appState.config.ai.model || "Ollama")}` : "Offline · manual entry remains available"}</span></div></div><div class="integration-item"><span class="integration-chip paypal-chip">P</span><div><strong>PayPal Checkout</strong><span>${paypalEnabled ? "Hosted Sandbox approval · server-only credentials · verified capture" : "Sandbox credentials unavailable"}</span></div></div><div class="integration-disclaimer">AI never accepts terms. Sandbox captures go to the configured test merchant—not the provider; no PayPal credential is sent to the browser.</div>`;
+    if (status && sharedMode) status.innerHTML = `<div class="integration-item"><span class="integration-chip">D1</span><div><strong>Shared demo record</strong><span>Cloudflare D1 · role-scoped invite · free-tier storage</span></div></div><div class="integration-item"><span class="integration-chip">AI</span><div><strong>Source-quoted term suggestions</strong><span>${aiEnabled ? `Enabled · ${escapeHtml(appState.config.ai.model || "Ollama")}` : "Offline · manual entry remains available"}</span></div></div><div class="integration-disclaimer">PayPal is disabled in shared mode. Only fictional demo content belongs here; invite links are bearer access, not authentication.</div>`;
+    else if (status) status.innerHTML = `<div class="integration-item"><span class="integration-chip">AI</span><div><strong>Source-quoted term suggestions</strong><span>${aiEnabled ? `Enabled · ${escapeHtml(appState.config.ai.model || "Ollama")}` : "Offline · manual entry remains available"}</span></div></div><div class="integration-item"><span class="integration-chip paypal-chip">P</span><div><strong>PayPal Checkout</strong><span>${paypalEnabled ? "Hosted Sandbox approval · server-only credentials · verified capture" : "Sandbox credentials unavailable"}</span></div></div><div class="integration-disclaimer">AI never accepts terms. Sandbox captures go to the configured test merchant—not the provider; no PayPal credential is sent to the browser.</div>`;
   }
-  $("#resetDemoButton").hidden = !publicDemo;
+  $("#resetDemoButton").hidden = !publicDemo || sharedMode;
+  $("#roleSelect").disabled = sharedMode;
+  for (const selector of ["#newAgreementButton", "#heroNewButton", "#smallNewButton"]) $(selector).hidden = sharedMode;
   if (!keepSelection || !appState.engagements.some((item) => item.id === selectedId)) selectedId = appState.engagements[0]?.id || null;
   $("#roleSelect").value = role;
   renderStats();
@@ -403,6 +445,47 @@ async function refresh({ keepSelection = true } = {}) {
   renderDetails();
   renderObligations();
   sendBrowserReminders();
+}
+
+async function createSharedInvites() {
+  const button = $("#createShareButton");
+  if (!$("#shareFictionalConfirm").checked) return toast("Confirm that you will use fictional test data only.", true);
+  button.disabled = true;
+  try {
+    const response = await fetch("/api/shared", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({ action: "create", fictionalConfirmed: true })
+    });
+    let payload = {};
+    try { payload = await response.json(); } catch {}
+    if (!response.ok) throw new Error(payload.error || `Request failed (${response.status}).`);
+    const makeInvite = (token) => `${window.location.origin}${window.location.pathname}#invite=${encodeURIComponent(token)}`;
+    $("#providerInviteLink").value = makeInvite(payload.providerToken);
+    $("#clientInviteLink").value = makeInvite(payload.clientToken);
+    $("#shareLinkResults").hidden = false;
+    button.hidden = true;
+    $("#shareFictionalConfirm").disabled = true;
+    toast("Two 30-day links are ready. Copy and share only the intended role link.");
+  } catch (error) {
+    toast(error.message || "Shared invite links could not be created.", true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function copySharedInvite(roleName) {
+  const input = $(roleName === "provider" ? "#providerInviteLink" : "#clientInviteLink");
+  if (!input?.value) return;
+  try {
+    await navigator.clipboard.writeText(input.value);
+    toast(`${roleName === "provider" ? "Provider" : "Client"} invite copied.`);
+  } catch {
+    input.focus();
+    input.select();
+    toast("Select and copy the invite link from the field.", true);
+  }
 }
 
 async function resetPublicDemo() {
@@ -765,6 +848,7 @@ async function handlePayPalRedirectResult(params) {
 
 function bindEvents() {
   $("#resetDemoButton").addEventListener("click", resetPublicDemo);
+  $("#createShareButton").addEventListener("click", createSharedInvites);
   $("#newAgreementButton").addEventListener("click", openNewAgreement);
   $("#heroNewButton").addEventListener("click", openNewAgreement);
   $("#smallNewButton").addEventListener("click", openNewAgreement);
@@ -775,12 +859,19 @@ function bindEvents() {
   $("#agreementSearch").addEventListener("input", () => { renderList(); renderDetails(); });
   $("#agreementStatusFilter").addEventListener("change", () => { renderList(); renderDetails(); });
   $("#roleSelect").addEventListener("change", async (event) => {
+    if (sharedInviteToken) { event.target.value = role; return; }
     role = event.target.value;
     localStorage.setItem("pact-demo-role", role);
     await refresh();
     toast(`Viewing the demo as ${role}. This switcher is not access control.`);
   });
   document.addEventListener("click", async (event) => {
+    if (event.target.closest("[data-share-selected]")) {
+      $("#shareDialog").showModal();
+      return;
+    }
+    const copyInvite = event.target.closest("[data-copy-share]");
+    if (copyInvite) return copySharedInvite(copyInvite.dataset.copyShare);
     const selectButton = event.target.closest("[data-select]");
     if (selectButton) { selectedId = selectButton.dataset.select; renderList(); renderDetails(); return; }
     if (event.target.closest("[data-export-json]")) return exportRecords("json");
@@ -811,7 +902,7 @@ async function main() {
   bindEvents();
   try {
     await refresh({ keepSelection: false });
-    if (new URLSearchParams(window.location.search).has("paypal")) await handlePayPalRedirectResult(new URLSearchParams(window.location.search));
+    if (!sharedInviteToken && new URLSearchParams(window.location.search).has("paypal")) await handlePayPalRedirectResult(new URLSearchParams(window.location.search));
   }
   catch (error) { $("#engagementDetails").innerHTML = `<div class="detail-card empty-detail"><h2>Workspace could not load</h2><p>${escapeHtml(error.message)}</p></div>`; }
   window.setInterval(sendBrowserReminders, 15 * 60 * 1000);

@@ -13,6 +13,7 @@ export function createStateHandler(environment = process.env) {
       config: {
         publicDemo: true,
         storage: "browser_local",
+        sharedStorageAvailable: Boolean(environment.PACT_SHARED_STORAGE_URL),
         ai: {
           enabled: aiConfigured,
           mode: aiConfigured ? "temporary_remote_ollama" : "disabled",
