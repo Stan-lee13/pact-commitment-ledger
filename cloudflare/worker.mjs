@@ -46,16 +46,11 @@ async function tokenHash(token) {
 }
 
 function createRateLimit(request, nowMs) {
-  const forwardedIp = request.headers.get("x-pact-client-ip");
-  const ip = forwardedIp || request.headers.get("cf-connecting-ip") || "unknown";
+  const ip = request.headers.get("cf-connecting-ip") || request.headers.get("x-pact-client-ip") || "unknown";
   const prior = createBuckets.get(ip);
   if (!prior || nowMs - prior.startedAt >= 60 * 60 * 1000) {
     createBuckets.set(ip, { startedAt: nowMs, count: 1 });
-    if (createBuckets.size > 1000) {
-      for (const [key, value] of createBuckets) {
-        if (nowMs - value.startedAt >= 60 * 60 * 1000) createBuckets.delete(key);
-      }
-    }
+    while (createBuckets.size > 1000) createBuckets.delete(createBuckets.keys().next().value);
     return true;
   }
   if (prior.count >= 5) return false;
@@ -64,7 +59,7 @@ function createRateLimit(request, nowMs) {
 }
 
 function allowSharedRequest(request, payload, nowMs) {
-  const ip = request.headers.get("x-pact-client-ip") || request.headers.get("cf-connecting-ip") || "unknown";
+  const ip = request.headers.get("cf-connecting-ip") || request.headers.get("x-pact-client-ip") || "unknown";
   const tokenKey = /^[a-f0-9]{64}$/.test(String(payload.token || "")) ? `invite:${payload.token.slice(0, 20)}` : null;
   const keys = [`ip:${ip}`, ...(tokenKey ? [tokenKey] : [])];
   for (const key of keys) {
@@ -76,9 +71,7 @@ function allowSharedRequest(request, payload, nowMs) {
     if (!current || nowMs - current.startedAt >= 60_000) requestBuckets.set(key, { startedAt: nowMs, count: 1 });
     else current.count += 1;
   }
-  if (requestBuckets.size > 5000) {
-    for (const [key, current] of requestBuckets) if (nowMs - current.startedAt >= 60_000) requestBuckets.delete(key);
-  }
+  while (requestBuckets.size > 5000) requestBuckets.delete(requestBuckets.keys().next().value);
   return true;
 }
 
