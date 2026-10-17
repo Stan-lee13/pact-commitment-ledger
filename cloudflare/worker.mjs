@@ -178,6 +178,25 @@ async function runScopedRequest(request, env, payload, now) {
     fail("This shared record is outside the fictional demo boundary.", 409);
   }
   const role = row.role;
+  if (pathname === "/api/shared-invites/client") {
+    if (role !== "provider") fail("Only the Provider invite can replace the Client invite.", 403);
+    const clientInvite = await env.PACT_DB.prepare(`
+      SELECT token_hash FROM shared_invites
+      WHERE workspace_id = ? AND role = 'client' AND expires_at > ?
+      LIMIT 1
+    `).bind(row.workspace_id, nowText).first();
+    if (!clientInvite) fail("The Client invite is no longer active. Create a new fictional demo share instead.", 409);
+    const replacementToken = newToken();
+    const replacementHash = await tokenHash(replacementToken);
+    const update = await env.PACT_DB.prepare(`
+      UPDATE shared_invites
+      SET token_hash = ?
+      WHERE token_hash = ? AND workspace_id = ? AND role = 'client' AND expires_at > ?
+    `).bind(replacementHash, clientInvite.token_hash, row.workspace_id, nowText).run();
+    const changes = Number(update?.meta?.changes ?? update?.changes ?? 0);
+    if (changes !== 1) fail("The Client invite changed at the same time. Refresh and retry.", 409);
+    return json({ role: "client", clientToken: replacementToken, expiresAt: row.invite_expires_at, replaced: true });
+  }
   const changeMatch = pathname.match(/^\/api\/engagements\/([^/]+)\/changes$/);
   const respondMatch = pathname.match(/^\/api\/engagements\/([^/]+)\/respond$/);
   const evidenceMatch = pathname.match(/^\/api\/engagements\/([^/]+)\/evidence$/);

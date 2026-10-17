@@ -285,6 +285,7 @@ function renderDetails() {
       ${noCurrentNote}
       ${renderChangeCard(engagement, pending, current)}
     </section>
+    ${sharedMode && role === "provider" ? '<section class="detail-card"><div class="section-title-row"><div><h3>Client invite access</h3><p>Replace a Client link if it was shared with the wrong person. Anyone holding the Provider link can do this; links do not verify identity.</p></div><button class="button button-outline button-small" type="button" data-rotate-client-invite>Replace Client link</button></div></section>' : ""}
     <section class="detail-card"><div class="section-title-row"><div><h3>${current ? "Current agreed terms" : "Draft terms"}</h3><p>${current ? "The last version both parties explicitly accepted." : "Not current until both parties explicitly accept."}</p></div><span class="status-pill ${current ? "status-accepted" : "status-proposed"}">${escapeHtml(reviewLabel)}</span></div>
       <div class="terms-grid">${termValue("Deliverables", terms.deliverables, "▤", true)}${termValue("Due date", formatDate(terms.dueDate), "◷")}${termValue("Revision limit", terms.revisionLimit, "↺")}${termValue("Total fee", terms.amountMinor == null ? null : formatMoney(terms.amountMinor, terms.currency), "$", true)}${termValue("Payment terms", terms.paymentTerms, "⇄")}${termValue("Completion / review", terms.completionCriteria, "✓", true)}</div>
     </section>
@@ -447,6 +448,10 @@ async function refresh({ keepSelection = true } = {}) {
   sendBrowserReminders();
 }
 
+function makeInvite(token) {
+  return `${window.location.origin}${window.location.pathname}#invite=${encodeURIComponent(token)}`;
+}
+
 async function createSharedInvites() {
   const button = $("#createShareButton");
   if (!$("#shareFictionalConfirm").checked) return toast("Confirm that you will use fictional test data only.", true);
@@ -461,7 +466,6 @@ async function createSharedInvites() {
     let payload = {};
     try { payload = await response.json(); } catch {}
     if (!response.ok) throw new Error(payload.error || `Request failed (${response.status}).`);
-    const makeInvite = (token) => `${window.location.origin}${window.location.pathname}#invite=${encodeURIComponent(token)}`;
     $("#providerInviteLink").value = makeInvite(payload.providerToken);
     $("#clientInviteLink").value = makeInvite(payload.clientToken);
     $("#shareLinkResults").hidden = false;
@@ -485,6 +489,39 @@ async function copySharedInvite(roleName) {
     input.focus();
     input.select();
     toast("Select and copy the invite link from the field.", true);
+  }
+}
+
+async function rotateSharedClientInvite() {
+  if (!sharedInviteToken || appState?.config?.sharedRole !== "provider") {
+    return toast("Only the Provider invite can replace the Client invite.", true);
+  }
+  if (!window.confirm("Replace the current Client invite? The old link will stop working immediately, and the new link keeps the same expiry date.")) return;
+  const button = $("[data-rotate-client-invite]");
+  if (button) button.disabled = true;
+  try {
+    const payload = await api("/api/shared-invites/client", { method: "POST", body: JSON.stringify({}) });
+    $("#rotatedClientInviteLink").value = makeInvite(payload.clientToken);
+    $("#rotatedClientInviteExpiry").textContent = formatTimestamp(payload.expiresAt);
+    $("#rotateClientDialog").showModal();
+    toast("Client invite replaced. The previous link no longer works; share the new one.");
+  } catch (error) {
+    toast(error.message || "The Client invite could not be replaced.", true);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function copyRotatedClientInvite() {
+  const input = $("#rotatedClientInviteLink");
+  if (!input?.value) return;
+  try {
+    await navigator.clipboard.writeText(input.value);
+    toast("Replacement Client invite copied.");
+  } catch {
+    input.focus();
+    input.select();
+    toast("Select and copy the replacement invite from the field.", true);
   }
 }
 
@@ -870,6 +907,8 @@ function bindEvents() {
       $("#shareDialog").showModal();
       return;
     }
+    if (event.target.closest("[data-rotate-client-invite]")) return rotateSharedClientInvite();
+    if (event.target.closest("[data-copy-rotated-client]")) return copyRotatedClientInvite();
     const copyInvite = event.target.closest("[data-copy-share]");
     if (copyInvite) return copySharedInvite(copyInvite.dataset.copyShare);
     const selectButton = event.target.closest("[data-select]");

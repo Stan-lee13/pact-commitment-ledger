@@ -131,6 +131,16 @@
     </form>
   </dialog>
 
+  <dialog id="rotateClientDialog" class="dialog-card" aria-labelledby="rotateClientDialogTitle">
+    <form method="dialog" class="dialog-form">
+      <div class="dialog-head"><div><span class="eyebrow">SHARED D1 DEMO</span><h2 id="rotateClientDialogTitle">Client invite replaced</h2><p>The previous Client link is invalid. Copy this replacement before closing; if you lose it, rotate again.</p></div><button class="icon-button close-dialog" type="button" aria-label="Close">×</button></div>
+      <div class="demo-banner" role="note"><strong>Bearer link access, not identity.</strong> Anyone holding the Provider link can replace the Client link. Keep this demo fictional; no account or identity check is involved.</div>
+      <label class="field field-wide">Replacement Client invite<input id="rotatedClientInviteLink" type="url" readonly autocomplete="off"></label>
+      <p class="small-disclaimer">This link keeps the original expiry: <strong id="rotatedClientInviteExpiry"></strong>.</p>
+      <div class="dialog-foot"><span class="quiet-note">Old Client link invalidated</span><div><button class="button button-outline button-small" type="button" data-copy-rotated-client>Copy Client link</button><button class="button button-plain cancel-dialog" type="button">Close</button></div></div>
+    </form>
+  </dialog>
+
   <dialog id="changeDialog" class="dialog-card">
     <form id="changeForm" method="dialog" class="dialog-form">
       <div class="dialog-head"><div><span class="eyebrow">VERSIONED CHANGE</span><h2>Propose a change</h2><p>The current accepted version stays in force until both parties accept this one.</p></div><button class="icon-button close-dialog" type="button" aria-label="Close">×</button></div>

@@ -21,6 +21,11 @@ class MemoryStatement {
         workspace_expires_at: workspace.expires_at
       };
     }
+    if (this.sql.startsWith("SELECT token_hash FROM shared_invites")) {
+      const [workspaceId, now] = this.values;
+      const invite = [...this.db.invites.values()].find((item) => item.workspace_id === workspaceId && item.role === "client" && item.expires_at > now);
+      return invite ? { token_hash: invite.token_hash } : null;
+    }
     throw new Error(`Unexpected first() SQL: ${this.sql}`);
   }
   async run() {
@@ -48,6 +53,14 @@ class MemoryStatement {
       if (this.sql.includes("SELECT") && !this.db.workspaces.has(requiredWorkspace)) return { meta: { changes: 0 } };
       const role = this.sql.includes("'provider'") ? "provider" : "client";
       this.db.invites.set(token_hash, { token_hash, workspace_id, role, created_at, expires_at });
+      return { meta: { changes: 1 } };
+    }
+    if (this.sql.startsWith("UPDATE shared_invites")) {
+      const [token_hash, priorHash, workspace_id, now] = this.values;
+      const invite = this.db.invites.get(priorHash);
+      if (!invite || invite.workspace_id !== workspace_id || invite.role !== "client" || invite.expires_at <= now) return { meta: { changes: 0 } };
+      this.db.invites.delete(priorHash);
+      this.db.invites.set(token_hash, { ...invite, token_hash });
       return { meta: { changes: 1 } };
     }
     if (this.sql.startsWith("UPDATE shared_workspaces")) {
@@ -164,6 +177,52 @@ test("invite tokens return a role-locked record and allow shared version updates
   assert.equal(loadedClient.payload.config.sharedRole, "client");
   assert.equal(loadedClient.payload.engagements[0].currentVersionId, versionId);
   assert.equal(db.workspaces.values().next().value.revision, 4);
+});
+
+test("provider can replace the Client invite without extending expiry; old link stops working", async () => {
+  const db = new MemoryD1();
+  const env = { PACT_DB: db };
+  const links = await newInvitePair(env, "31");
+  const denied = await call(env, {
+    action: "request", token: links.clientToken, path: "/api/shared-invites/client", method: "POST", body: {}
+  });
+  assert.equal(denied.status, 403);
+
+  const rotated = await call(env, {
+    action: "request", token: links.providerToken, path: "/api/shared-invites/client", method: "POST", body: {}
+  });
+  assert.equal(rotated.status, 200);
+  assert.equal(rotated.payload.role, "client");
+  assert.equal(rotated.payload.replaced, true);
+  assert.match(rotated.payload.clientToken, /^[a-f0-9]{64}$/);
+  assert.notEqual(rotated.payload.clientToken, links.clientToken);
+  assert.equal(rotated.payload.expiresAt, links.expiresAt);
+  assert.equal(db.invites.size, 2);
+
+  const priorLink = await call(env, { action: "request", token: links.clientToken, path: "/api/state", method: "GET" });
+  assert.equal(priorLink.status, 404);
+  const replacementLink = await call(env, { action: "request", token: rotated.payload.clientToken, path: "/api/state", method: "GET" });
+  assert.equal(replacementLink.status, 200);
+  assert.equal(replacementLink.payload.config.sharedRole, "client");
+  const providerLink = await call(env, { action: "request", token: links.providerToken, path: "/api/state", method: "GET" });
+  assert.equal(providerLink.status, 200);
+});
+
+test("concurrent Client invite rotations return one link and one refresh conflict", async () => {
+  const db = new MemoryD1();
+  const env = { PACT_DB: db };
+  const links = await newInvitePair(env, "32");
+  const rotations = await Promise.all([
+    call(env, { action: "request", token: links.providerToken, path: "/api/shared-invites/client", method: "POST", body: {} }),
+    call(env, { action: "request", token: links.providerToken, path: "/api/shared-invites/client", method: "POST", body: {} })
+  ]);
+  assert.deepEqual(rotations.map((item) => item.status).sort(), [200, 409]);
+  const winner = rotations.find((item) => item.status === 200);
+  assert.match(winner.payload.clientToken, /^[a-f0-9]{64}$/);
+  assert.equal(db.invites.size, 2);
+  const replacement = await call(env, { action: "request", token: winner.payload.clientToken, path: "/api/state", method: "GET" });
+  assert.equal(replacement.status, 200);
+  assert.equal(replacement.payload.config.sharedRole, "client");
 });
 
 test("shared mode rejects create, delete, and every PayPal route", async () => {
