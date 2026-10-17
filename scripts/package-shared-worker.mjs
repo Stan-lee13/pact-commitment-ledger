@@ -8,6 +8,7 @@ await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
 const modules = [
   [path.join(root, "cloudflare", "worker.mjs"), path.join(output, "worker.mjs")],
+  [path.join(root, "cloudflare", "accounts.mjs"), path.join(output, "accounts.mjs")],
   [path.join(root, "public", "domain.mjs"), path.join(output, "domain.mjs")],
   [path.join(root, "src", "demo-data.mjs"), path.join(output, "demo-data.mjs")]
 ];
@@ -16,7 +17,7 @@ for (const [source, target] of modules) {
   await writeFile(target, contents, { mode: 0o600 });
 }
 const expectedImports = await readFile(path.join(output, "worker.mjs"), "utf8");
-if (!expectedImports.includes('from "./domain.mjs"') || !expectedImports.includes('from "./demo-data.mjs"')) {
+if (!expectedImports.includes('from "./domain.mjs"') || !expectedImports.includes('from "./demo-data.mjs"') || !expectedImports.includes('from "./accounts.mjs"')) {
   throw new Error("Cloudflare Worker module imports do not match the upload package.");
 }
 console.log(`Packaged ${modules.length} Worker modules at ${output}`);

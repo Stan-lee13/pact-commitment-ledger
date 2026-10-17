@@ -6,10 +6,14 @@ const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]);
 const isPublicStaticBuild = document.querySelector('meta[name="pact-public-demo"]')?.content === "true";
 const sharedInviteToken = new URLSearchParams(window.location.hash.slice(1)).get("invite") || "";
+let accountInviteToken = new URLSearchParams(window.location.hash.slice(1)).get("account-invite") || "";
 
 let appState = null;
 let selectedId = null;
 let role = localStorage.getItem("pact-demo-role") === "client" ? "client" : "provider";
+let accountSession = null;
+let activeWorkspaceId = "";
+let accountServiceAvailable = false;
 let toastTimer;
 let currentAiCandidates = [];
 let localDemoApi = null;
@@ -26,6 +30,46 @@ async function startPublicDemo() {
   } catch {}
   localDemoApi = createLocalDemoApi({ initialState, storage: window.localStorage, key: PUBLIC_DEMO_STORAGE_KEY, publicConfig });
   return localDemoApi;
+}
+
+async function accountApi(operation, fields = {}) {
+  let response;
+  try {
+    response = await fetch("/api/account", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      credentials: "same-origin",
+      cache: "no-store",
+      body: JSON.stringify({ operation, ...fields })
+    });
+  } catch {
+    throw new Error("The pseudonymous demo account service could not be reached.");
+  }
+  let payload = {};
+  try { payload = await response.json(); } catch {}
+  if (!response.ok) throw new Error(payload.error || `Request failed (${response.status}).`);
+  return payload;
+}
+
+async function loadAccountSession(preferredWorkspaceId = "") {
+  if (!isPublicStaticBuild || sharedInviteToken) return;
+  try {
+    const session = await accountApi("session");
+    accountServiceAvailable = true;
+    accountSession = session.authenticated ? session : null;
+    const savedId = preferredWorkspaceId || localStorage.getItem("pact-demo-workspace") || "";
+    activeWorkspaceId = accountSession?.workspaces?.some((workspace) => workspace.id === savedId)
+      ? savedId
+      : accountSession?.workspaces?.[0]?.id || "";
+    if (activeWorkspaceId) localStorage.setItem("pact-demo-workspace", activeWorkspaceId);
+    else localStorage.removeItem("pact-demo-workspace");
+    renderAccountDialog();
+  } catch {
+    accountServiceAvailable = false;
+    accountSession = null;
+    activeWorkspaceId = "";
+    renderAccountDialog();
+  }
 }
 
 async function api(path, options = {}) {
@@ -50,6 +94,21 @@ async function api(path, options = {}) {
     let payload = {};
     try { payload = await response.json(); } catch {}
     if (!response.ok) throw new Error(payload.error || `Request failed (${response.status}).`);
+    return payload;
+  }
+  if (accountSession?.authenticated && activeWorkspaceId && path !== "/api/ai/extract") {
+    if (path.startsWith("/api/paypal")) throw new Error("PayPal is disabled in authenticated demo workspaces.");
+    let body = {};
+    if (options.body) {
+      try { body = typeof options.body === "string" ? JSON.parse(options.body) : options.body; }
+      catch { throw new Error("Request body must be valid JSON."); }
+    }
+    const payload = await accountApi("request", {
+      workspaceId: activeWorkspaceId,
+      path,
+      method: options.method || "GET",
+      body
+    });
     return payload;
   }
   if (localDemoApi) return localDemoApi(path, options);
@@ -244,7 +303,7 @@ function renderEvidence(engagement) {
       ? `<a class="attachment-link" href="${escapeHtml(item.attachment.dataUrl)}" download="${escapeHtml(item.attachment.name)}">Download ${escapeHtml(item.attachment.name)} · ${escapeHtml(formatBytes(item.attachment.size))}</a>` : "";
     return `<article class="evidence-item"><div class="evidence-item-head"><span class="reported-tag">Reported by ${escapeHtml(personName(engagement, item.actor))}</span><time class="reported-tag">${escapeHtml(formatTimestamp(item.at))}</time></div><p>${escapeHtml(item.description)}</p>${item.url ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.url)}</a>` : ""}${attachment}</article>`;
   }).join("") : '<div class="empty-evidence">No evidence notes yet. Notes are self-reported, not verified.</div>';
-  const attachmentStorageNote = appState?.config?.storage === "shared_d1"
+  const attachmentStorageNote = ["shared_d1", "account_d1"].includes(appState?.config?.storage)
     ? "Fictional notes and attachments are saved with this shared demo record in D1. PACT does not upload or verify evidence."
     : "Files remain in this browser-local demo and are included in exports. PACT does not upload or verify evidence.";
   return `<section class="detail-card"><div class="section-title-row"><div><h3>Evidence & delivery notes</h3><p>References are attributed to the person who added them.</p></div></div><div class="evidence-layout"><form id="evidenceForm" class="evidence-form"><label class="field">Add a note<textarea name="description" required maxlength="600" rows="3" placeholder="e.g. Shared first design draft for review"></textarea></label><label class="field">Optional link<input name="url" type="url" maxlength="500" placeholder="https://…"></label><label class="field">Optional attachment <span class="field-hint">PDF, PNG, JPEG, TXT, CSV or Markdown · max 256 KiB</span><input name="attachment" type="file" accept=".pdf,.png,.jpg,.jpeg,.txt,.csv,.md,application/pdf,image/png,image/jpeg,text/plain,text/csv,text/markdown"></label><button class="button button-outline button-small" type="submit">Add reported note <span aria-hidden="true">＋</span></button><span class="small-disclaimer">${attachmentStorageNote}</span></form><div class="evidence-list">${rows}</div></div></section>`;
@@ -272,7 +331,8 @@ function renderDetails() {
   const pending = pendingVersion(engagement);
   const displayVersion = current || pending || engagement.versions.at(-1);
   const hasSandboxOrder = Boolean(engagement.payment?.orderId || engagement.payment?.captureId);
-  const sharedMode = appState?.config?.storage === "shared_d1";
+  const accountMode = appState?.config?.storage === "account_d1";
+  const sharedMode = ["shared_d1", "account_d1"].includes(appState?.config?.storage);
   const canShareSample = !sharedMode && appState?.config?.sharedStorageAvailable && engagement.id === "demo-pact-01";
   const party = role === "provider" ? engagement.clientName : engagement.providerName;
   const reviewLabel = current ? versionNumber(engagement, current) : "Draft · not yet mutually accepted";
@@ -285,7 +345,7 @@ function renderDetails() {
       ${noCurrentNote}
       ${renderChangeCard(engagement, pending, current)}
     </section>
-    ${sharedMode && role === "provider" ? '<section class="detail-card"><div class="section-title-row"><div><h3>Client invite access</h3><p>Replace a Client link if it was shared with the wrong person. Anyone holding the Provider link can do this; links do not verify identity.</p></div><button class="button button-outline button-small" type="button" data-rotate-client-invite>Replace Client link</button></div></section>' : ""}
+    ${sharedMode && role === "provider" ? `<section class="detail-card"><div class="section-title-row"><div><h3>Client invite access</h3><p>${accountMode ? "Replace an unused Client invite if it was exposed. Workspace actions require a signed-in account with the fixed Provider role; the invite still does not verify a person's identity." : "Replace a Client link if it was shared with the wrong person. Anyone holding the Provider link can do this; links do not verify identity."}</p></div><button class="button button-outline button-small" type="button" data-rotate-client-invite>Replace Client link</button></div></section>` : ""}
     <section class="detail-card"><div class="section-title-row"><div><h3>${current ? "Current agreed terms" : "Draft terms"}</h3><p>${current ? "The last version both parties explicitly accepted." : "Not current until both parties explicitly accept."}</p></div><span class="status-pill ${current ? "status-accepted" : "status-proposed"}">${escapeHtml(reviewLabel)}</span></div>
       <div class="terms-grid">${termValue("Deliverables", terms.deliverables, "▤", true)}${termValue("Due date", formatDate(terms.dueDate), "◷")}${termValue("Revision limit", terms.revisionLimit, "↺")}${termValue("Total fee", terms.amountMinor == null ? null : formatMoney(terms.amountMinor, terms.currency), "$", true)}${termValue("Payment terms", terms.paymentTerms, "⇄")}${termValue("Completion / review", terms.completionCriteria, "✓", true)}</div>
     </section>
@@ -409,19 +469,27 @@ async function enableBrowserReminders() {
 async function refresh({ keepSelection = true } = {}) {
   appState = await api("/api/state");
   const publicDemo = Boolean(appState.config?.publicDemo);
-  const sharedMode = appState.config?.storage === "shared_d1";
+  const accountMode = appState.config?.storage === "account_d1";
+  const sharedMode = ["shared_d1", "account_d1"].includes(appState.config?.storage);
   if (sharedMode && ["provider", "client"].includes(appState.config.sharedRole)) role = appState.config.sharedRole;
   if (publicDemo) {
     const aiEnabled = Boolean(appState.config?.ai?.enabled);
     const paypalEnabled = !sharedMode && Boolean(appState.config?.paypal?.configured);
     if (sharedMode) {
       const expiry = appState.config.inviteExpiresAt ? formatTimestamp(appState.config.inviteExpiresAt) : "in 30 days";
-      $("#demoBannerText").innerHTML = `<strong>Public shared demo.</strong> This fictional sample is stored in shared D1. This link is fixed to the ${escapeHtml(role)} role, limited to one demo agreement, and expires ${escapeHtml(expiry)}. Anyone with the link can use it. Never enter real data; this is not authentication, a private portal, legal advice, or proof of enforceability.`;
-      $("#storageLabel").textContent = "Shared D1 demo";
-      $("#storageNote").textContent = "One fictional sample record is shared through this role-scoped invite for 30 days.";
-      $("#footerSafety").textContent = "Public prototype · Fictional data only · No authentication or legal enforceability · Payments disabled";
+      if (accountMode) {
+        $("#demoBannerText").innerHTML = `<strong>Account-scoped demo workspace.</strong> This fictional sample is stored in shared D1 and requires a signed-in pseudonymous account with the fixed ${escapeHtml(role)} role. Account keys prove possession only; there is no email verification or identity proof. PACT does not detect or block real data; the fictional-only rule is an attestation. Workspace expires ${escapeHtml(expiry)}. Never enter real data; this is not a private legal portal or proof of enforceability.`;
+        $("#storageLabel").textContent = "Account-scoped D1 demo";
+        $("#storageNote").textContent = "Fixed-role membership is checked by the server; no name or email is stored.";
+        $("#footerSafety").textContent = "Pseudonymous demo accounts · Fictional data only · No verified identity · Payments disabled";
+      } else {
+      $("#demoBannerText").innerHTML = `<strong>Public shared demo.</strong> This fictional sample is stored in shared D1. This link is fixed to the ${escapeHtml(role)} role, limited to one demo agreement, and expires ${escapeHtml(expiry)}. Anyone with the link can use it. PACT does not detect or block real data; the fictional-only rule is an attestation. Never enter real data; this is not authentication, a private portal, legal advice, or proof of enforceability.`;
+        $("#storageLabel").textContent = "Shared D1 demo";
+        $("#storageNote").textContent = "One fictional sample record is shared through this role-scoped invite for 30 days.";
+        $("#footerSafety").textContent = "Public prototype · Fictional data only · No authentication or legal enforceability · Payments disabled";
+      }
     } else {
-      $("#demoBannerText").innerHTML = `<strong>Public demo mode.</strong> Records stay in this browser. ${aiEnabled ? "AI sends selected text to a temporary local-model service." : "AI service is currently unavailable."} ${paypalEnabled ? "PayPal uses Sandbox only." : "PayPal Sandbox is currently unavailable."} Use fictional data only; never enter real client, contract, or payment details.`;
+      $("#demoBannerText").innerHTML = `<strong>Public demo mode.</strong> Records stay in this browser. ${aiEnabled ? "AI sends selected text to a temporary local-model service." : "AI service is currently unavailable."} ${paypalEnabled ? "PayPal uses Sandbox only." : "PayPal Sandbox is currently unavailable."} PACT does not detect or block real data; use fictional content only and never enter real client, contract, or payment details.`;
       $("#storageLabel").textContent = "Browser-local demo";
       $("#storageNote").textContent = "Data stays in this browser; it is not shared across people or devices.";
       $("#footerSafety").textContent = "Synthetic-data demo · No accounts or cloud sync · PayPal Sandbox only · AI service may be temporary";
@@ -433,7 +501,7 @@ async function refresh({ keepSelection = true } = {}) {
       ? `Qwen3 4B · temporary local-model service · selected text is sent for this request only`
       : "AI service is temporarily unavailable · enter terms manually";
     const status = $("#integrationStatus");
-    if (status && sharedMode) status.innerHTML = `<div class="integration-item"><span class="integration-chip">D1</span><div><strong>Shared demo record</strong><span>Cloudflare D1 · role-scoped invite · free-tier storage</span></div></div><div class="integration-item"><span class="integration-chip">AI</span><div><strong>Source-quoted term suggestions</strong><span>${aiEnabled ? `Enabled · ${escapeHtml(appState.config.ai.model || "Ollama")}` : "Offline · manual entry remains available"}</span></div></div><div class="integration-disclaimer">PayPal is disabled in shared mode. Only fictional demo content belongs here; invite links are bearer access, not authentication.</div>`;
+    if (status && sharedMode) status.innerHTML = `<div class="integration-item"><span class="integration-chip">D1</span><div><strong>Shared demo record</strong><span>Cloudflare D1 · role-scoped invite · free-tier storage</span></div></div><div class="integration-item"><span class="integration-chip">AI</span><div><strong>Source-quoted term suggestions</strong><span>${aiEnabled ? `Enabled · ${escapeHtml(appState.config.ai.model || "Ollama")}` : "Offline · manual entry remains available"}</span></div></div><div class="integration-disclaimer">PayPal is disabled in shared mode. Only fictional demo content belongs here; the fictional-only rule is user-attested, and legacy invite links are bearer access.</div>`;
     else if (status) status.innerHTML = `<div class="integration-item"><span class="integration-chip">AI</span><div><strong>Source-quoted term suggestions</strong><span>${aiEnabled ? `Enabled · ${escapeHtml(appState.config.ai.model || "Ollama")}` : "Offline · manual entry remains available"}</span></div></div><div class="integration-item"><span class="integration-chip paypal-chip">P</span><div><strong>PayPal Checkout</strong><span>${paypalEnabled ? "Hosted Sandbox approval · server-only credentials · verified capture" : "Sandbox credentials unavailable"}</span></div></div><div class="integration-disclaimer">AI never accepts terms. Sandbox captures go to the configured test merchant—not the provider; no PayPal credential is sent to the browser.</div>`;
   }
   $("#resetDemoButton").hidden = !publicDemo || sharedMode;
@@ -446,10 +514,206 @@ async function refresh({ keepSelection = true } = {}) {
   renderDetails();
   renderObligations();
   sendBrowserReminders();
+  renderAccountDialog();
 }
 
 function makeInvite(token) {
   return `${window.location.origin}${window.location.pathname}#invite=${encodeURIComponent(token)}`;
+}
+
+function makeAccountInvite(token) {
+  return `${window.location.origin}${window.location.pathname}#account-invite=${encodeURIComponent(token)}`;
+}
+
+function setAccountMessage(message, isError = false) {
+  const node = $("#accountMessage");
+  node.textContent = message;
+  node.classList.toggle("account-error", isError);
+}
+
+function renderAccountDialog() {
+  const button = $("#accountButton");
+  const available = isPublicStaticBuild && (accountServiceAvailable || appState?.config?.accountDemoAvailable);
+  button.hidden = !available || Boolean(sharedInviteToken);
+  $("#accountInviteNotice").hidden = !accountInviteToken;
+  if (accountInviteToken) $("#accountInviteNotice").textContent = "A Client workspace invitation is waiting. Sign in or create a pseudonymous demo account, then choose Join Client workspace. This invitation is one-time and does not verify identity.";
+  if (!available) return;
+
+  const signedIn = Boolean(accountSession?.authenticated);
+  $("#accountSignedOut").hidden = signedIn;
+  $("#accountSignedIn").hidden = !signedIn;
+  if (!signedIn) {
+    button.textContent = "Demo account";
+    $("#accountWorkspaceSelectWrap").hidden = true;
+    $("#joinAccountWorkspaceButton").hidden = true;
+    return;
+  }
+
+  const account = accountSession.account || {};
+  const workspaces = Array.isArray(accountSession.workspaces) ? accountSession.workspaces : [];
+  button.textContent = `Account · ${account.handle || "signed in"}`;
+  $("#accountSignedInLabel").textContent = `Signed in as ${account.handle || "pseudonymous participant"}. This handle is not a verified identity. Account expires ${formatTimestamp(account.expiresAt)}.`;
+  const selectWrap = $("#accountWorkspaceSelectWrap");
+  const select = $("#accountWorkspaceSelect");
+  selectWrap.hidden = workspaces.length === 0;
+  select.innerHTML = workspaces.map((workspace) => `<option value="${escapeHtml(workspace.id)}" ${workspace.id === activeWorkspaceId ? "selected" : ""}>${escapeHtml(workspace.role)} · ${escapeHtml(workspace.id.slice(0, 8))} · expires ${escapeHtml(formatTimestamp(workspace.expiresAt))}</option>`).join("");
+  $("#createAccountWorkspaceButton").disabled = workspaces.length >= 3;
+  $("#joinAccountWorkspaceButton").hidden = !accountInviteToken;
+}
+
+function showAccountKey(handle, key) {
+  $("#accountKeyHandle").value = String(handle || "");
+  $("#accountKeyValue").value = String(key || "");
+  $("#accountKeyNotice").hidden = !key;
+}
+
+function clearAccountInviteFromHash() {
+  accountInviteToken = "";
+  window.history.replaceState(null, document.title, `${window.location.pathname}${window.location.search}`);
+}
+
+async function registerDemoAccount() {
+  if (!$("#accountFictionalConfirm").checked) return setAccountMessage("Confirm fictional-only use before creating an account.", true);
+  const button = $("#registerAccountButton");
+  button.disabled = true;
+  try {
+    const result = await accountApi("register", { fictionalConfirmed: true });
+    await loadAccountSession();
+    showAccountKey(result.account?.handle, result.accountKey);
+    setAccountMessage("Account created. Save the handle and key now; the key cannot be recovered.");
+    await refresh({ keepSelection: false });
+    renderAccountDialog();
+  } catch (error) {
+    setAccountMessage(error.message || "The demo account could not be created.", true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function signInDemoAccount(event) {
+  event.preventDefault();
+  const handle = $("#accountLoginHandle").value.trim();
+  const accountKey = $("#accountLoginKey").value.trim();
+  const button = event.submitter;
+  if (button) button.disabled = true;
+  try {
+    await accountApi("login", { handle, accountKey });
+    $("#accountLoginKey").value = "";
+    await loadAccountSession();
+    if (!accountSession?.authenticated) throw new Error("The account session could not be confirmed.");
+    setAccountMessage("Signed in. Choose a workspace or create a fictional demo workspace.");
+    renderAccountDialog();
+    if (activeWorkspaceId) await refresh({ keepSelection: false });
+  } catch (error) {
+    setAccountMessage(error.message || "Sign-in failed.", true);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function createAccountWorkspace() {
+  if (!$("#accountWorkspaceFictionalConfirm").checked) return setAccountMessage("Confirm fictional-only use before creating a workspace.", true);
+  const button = $("#createAccountWorkspaceButton");
+  button.disabled = true;
+  try {
+    const result = await accountApi("create_workspace", { fictionalConfirmed: true });
+    await loadAccountSession(result.workspace.id);
+    activeWorkspaceId = result.workspace.id;
+    localStorage.setItem("pact-demo-workspace", activeWorkspaceId);
+    $("#accountWorkspaceFictionalConfirm").checked = false;
+    $("#accountInviteLink").value = makeAccountInvite(result.inviteToken);
+    $("#accountInviteResult").hidden = false;
+    setAccountMessage("Fictional workspace created. Copy the Client invite now; the raw token is shown only once.");
+    renderAccountDialog();
+    await refresh({ keepSelection: false });
+  } catch (error) {
+    setAccountMessage(error.message || "The demo workspace could not be created.", true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function joinAccountWorkspace() {
+  if (!accountInviteToken) return setAccountMessage("No Client workspace invite is present in this link.", true);
+  const button = $("#joinAccountWorkspaceButton");
+  button.disabled = true;
+  try {
+    const result = await accountApi("join_workspace", { inviteToken: accountInviteToken });
+    await loadAccountSession(result.workspace.id);
+    activeWorkspaceId = result.workspace.id;
+    localStorage.setItem("pact-demo-workspace", activeWorkspaceId);
+    clearAccountInviteFromHash();
+    setAccountMessage("Joined the fictional workspace as Client. The invite token has been removed from the address bar.");
+    renderAccountDialog();
+    await refresh({ keepSelection: false });
+  } catch (error) {
+    setAccountMessage(error.message || "The Client workspace could not be joined.", true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function replaceAccountKey() {
+  if (!window.confirm("Replace your account key? The old key will stop working and other signed-in sessions will be revoked. Save the new key before closing.")) return;
+  const button = $("#rotateAccountKeyButton");
+  button.disabled = true;
+  try {
+    const result = await accountApi("rotate_key");
+    showAccountKey(accountSession?.account?.handle, result.accountKey);
+    setAccountMessage("Account key replaced. The previous key and other active sessions are now invalid.");
+  } catch (error) {
+    setAccountMessage(error.message || "The account key could not be replaced.", true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function signOutDemoAccount() {
+  const button = $("#logoutAccountButton");
+  button.disabled = true;
+  try {
+    await accountApi("logout");
+    accountSession = null;
+    activeWorkspaceId = "";
+    localStorage.removeItem("pact-demo-workspace");
+    showAccountKey("", "");
+    $("#accountInviteResult").hidden = true;
+    $("#accountInviteLink").value = "";
+    setAccountMessage("Signed out of the demo account.");
+    renderAccountDialog();
+    await refresh({ keepSelection: false });
+  } catch (error) {
+    setAccountMessage(error.message || "The demo account could not be signed out.", true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function copyAccountKey() {
+  const handle = $("#accountKeyHandle").value;
+  const key = $("#accountKeyValue").value;
+  if (!handle || !key) return;
+  try {
+    await navigator.clipboard.writeText(`Handle: ${handle}\nAccount key: ${key}`);
+    setAccountMessage("Handle and key copied. Save them securely; the key is not recoverable.");
+  } catch {
+    $("#accountKeyValue").focus();
+    $("#accountKeyValue").select();
+    setAccountMessage("Clipboard access is unavailable. Copy the handle and key from their fields.", true);
+  }
+}
+
+async function copyAccountInvite() {
+  const input = $("#accountInviteLink");
+  if (!input?.value) return;
+  try {
+    await navigator.clipboard.writeText(input.value);
+    setAccountMessage("One-time Client invite copied. Share it only with the intended demo participant.");
+  } catch {
+    input.focus();
+    input.select();
+    setAccountMessage("Clipboard access is unavailable. Copy the invite link from its field.", true);
+  }
 }
 
 async function createSharedInvites() {
@@ -493,15 +757,22 @@ async function copySharedInvite(roleName) {
 }
 
 async function rotateSharedClientInvite() {
-  if (!sharedInviteToken || appState?.config?.sharedRole !== "provider") {
+  const accountMode = appState?.config?.storage === "account_d1";
+  const canRotate = accountMode
+    ? Boolean(accountSession?.authenticated && activeWorkspaceId && appState?.config?.sharedRole === "provider")
+    : Boolean(sharedInviteToken && appState?.config?.sharedRole === "provider");
+  if (!canRotate) {
     return toast("Only the Provider invite can replace the Client invite.", true);
   }
-  if (!window.confirm("Replace the current Client invite? The old link will stop working immediately, and the new link keeps the same expiry date.")) return;
+  const confirmText = accountMode
+    ? "Replace the unused Client invite? The previous invite stops working immediately, and the replacement keeps the same expiry date."
+    : "Replace the current Client invite? The old link will stop working immediately, and the new link keeps the same expiry date.";
+  if (!window.confirm(confirmText)) return;
   const button = $("[data-rotate-client-invite]");
   if (button) button.disabled = true;
   try {
     const payload = await api("/api/shared-invites/client", { method: "POST", body: JSON.stringify({}) });
-    $("#rotatedClientInviteLink").value = makeInvite(payload.clientToken);
+    $("#rotatedClientInviteLink").value = accountMode ? makeAccountInvite(payload.clientToken) : makeInvite(payload.clientToken);
     $("#rotatedClientInviteExpiry").textContent = formatTimestamp(payload.expiresAt);
     $("#rotateClientDialog").showModal();
     toast("Client invite replaced. The previous link no longer works; share the new one.");
@@ -886,6 +1157,21 @@ async function handlePayPalRedirectResult(params) {
 function bindEvents() {
   $("#resetDemoButton").addEventListener("click", resetPublicDemo);
   $("#createShareButton").addEventListener("click", createSharedInvites);
+  $("#accountButton").addEventListener("click", () => { renderAccountDialog(); $("#accountDialog").showModal(); });
+  $("#registerAccountButton").addEventListener("click", registerDemoAccount);
+  $("#accountLoginForm").addEventListener("submit", signInDemoAccount);
+  $("#createAccountWorkspaceButton").addEventListener("click", createAccountWorkspace);
+  $("#joinAccountWorkspaceButton").addEventListener("click", joinAccountWorkspace);
+  $("#rotateAccountKeyButton").addEventListener("click", replaceAccountKey);
+  $("#logoutAccountButton").addEventListener("click", signOutDemoAccount);
+  $("#accountWorkspaceSelect").addEventListener("change", async (event) => {
+    const selected = accountSession?.workspaces?.find((workspace) => workspace.id === event.target.value);
+    if (!selected) return;
+    activeWorkspaceId = selected.id;
+    localStorage.setItem("pact-demo-workspace", selected.id);
+    selectedId = null;
+    await refresh({ keepSelection: false });
+  });
   $("#newAgreementButton").addEventListener("click", openNewAgreement);
   $("#heroNewButton").addEventListener("click", openNewAgreement);
   $("#smallNewButton").addEventListener("click", openNewAgreement);
@@ -903,6 +1189,8 @@ function bindEvents() {
     toast(`Viewing the demo as ${role}. This switcher is not access control.`);
   });
   document.addEventListener("click", async (event) => {
+    if (event.target.closest("[data-copy-account-key]")) return copyAccountKey();
+    if (event.target.closest("[data-copy-account-invite]")) return copyAccountInvite();
     if (event.target.closest("[data-share-selected]")) {
       $("#shareDialog").showModal();
       return;
@@ -940,8 +1228,10 @@ function bindEvents() {
 async function main() {
   bindEvents();
   try {
+    await loadAccountSession();
     await refresh({ keepSelection: false });
-    if (!sharedInviteToken && new URLSearchParams(window.location.search).has("paypal")) await handlePayPalRedirectResult(new URLSearchParams(window.location.search));
+    if (accountInviteToken && accountServiceAvailable) $("#accountDialog").showModal();
+    if (!sharedInviteToken && !accountInviteToken && new URLSearchParams(window.location.search).has("paypal")) await handlePayPalRedirectResult(new URLSearchParams(window.location.search));
   }
   catch (error) { $("#engagementDetails").innerHTML = `<div class="detail-card empty-detail"><h2>Workspace could not load</h2><p>${escapeHtml(error.message)}</p></div>`; }
   window.setInterval(sendBrowserReminders, 15 * 60 * 1000);

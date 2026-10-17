@@ -25,6 +25,7 @@
         <option value="provider">Provider</option>
         <option value="client">Client</option>
       </select>
+      <button id="accountButton" class="button button-outline" type="button" hidden>Demo account</button>
       <button id="newAgreementButton" class="button button-dark" type="button"><span aria-hidden="true">＋</span> New agreement</button>
     </div>
   </header>
@@ -118,8 +119,8 @@
   <dialog id="shareDialog" class="dialog-card">
     <form id="shareDialogForm" method="dialog" class="dialog-form">
       <div class="dialog-head"><div><span class="eyebrow">SHARED D1 DEMO</span><h2>Create scoped invite links</h2><p>This creates a fresh copy of the built-in fictional sample in the shared demo database. Each link is limited to that one record and one fixed role, and expires after 30 days.</p></div><button class="icon-button close-dialog" type="button" aria-label="Close">×</button></div>
-      <div class="demo-banner" role="note"><strong>Public prototype only.</strong> Anyone holding an invite link can access the demo record as its assigned role. Do not enter real names, terms, messages, contact details, or attachments. Not authentication, a private client portal, legal advice, or proof of enforceability. PayPal is disabled in shared mode.</div>
-      <label class="field"><input id="shareFictionalConfirm" type="checkbox" required> I confirm I will use fictional test data only.</label>
+      <div class="demo-banner" role="note"><strong>Public prototype only.</strong> Anyone holding an invite link can access the demo record as its assigned role. PACT does not detect or block real data; this confirmation is an attestation, not a technical safeguard. Do not enter real names, terms, messages, contact details, or attachments. Not authentication, a private client portal, legal advice, or proof of enforceability. PayPal is disabled in shared mode.</div>
+      <label class="field"><input id="shareFictionalConfirm" type="checkbox" required> I understand PACT cannot detect real data, and I will use fictional test data only.</label>
       <div id="shareLinkResults" class="form-grid" hidden>
         <label class="field field-wide">Provider invite <input id="providerInviteLink" type="url" readonly></label>
         <button class="button button-outline button-small" type="button" data-copy-share="provider">Copy Provider link</button>
@@ -139,6 +140,56 @@
       <p class="small-disclaimer">This link keeps the original expiry: <strong id="rotatedClientInviteExpiry"></strong>.</p>
       <div class="dialog-foot"><span class="quiet-note">Old Client link invalidated</span><div><button class="button button-outline button-small" type="button" data-copy-rotated-client>Copy Client link</button><button class="button button-plain cancel-dialog" type="button">Close</button></div></div>
     </form>
+  </dialog>
+
+  <dialog id="accountDialog" class="dialog-card" aria-labelledby="accountDialogTitle">
+    <div class="dialog-form">
+      <div class="dialog-head"><div><span class="eyebrow">PSEUDONYMOUS · DEMO ONLY</span><h2 id="accountDialogTitle">Participant account</h2><p>No email, name, or password is collected. This account key proves possession only; it does not verify a person or legal identity.</p></div><button class="icon-button close-dialog" type="button" aria-label="Close">×</button></div>
+      <div class="demo-banner" role="note"><strong>Fictional test data only.</strong> PACT does not detect or block real data; the fictional-only rule is an attestation. Do not enter real personal, contract, customer, payment, or identity information. Account keys cannot be recovered. Save your generated key somewhere safe and use it only for this demo; never reuse a real account password or secret.</div>
+      <p id="accountInviteNotice" class="small-disclaimer" hidden></p>
+      <section id="accountKeyNotice" class="account-key-notice" hidden aria-live="polite">
+        <strong>Save this account key now</strong>
+        <p>It is shown only at creation or replacement. PACT stores its SHA-256 hash; if you lose it, you cannot sign in again unless you are still signed in and replace it.</p>
+        <label class="field">Generated handle<input id="accountKeyHandle" type="text" readonly autocomplete="off"></label>
+        <label class="field">One-time account key<input id="accountKeyValue" type="text" readonly autocomplete="off" spellcheck="false"></label>
+        <button class="button button-outline button-small" type="button" data-copy-account-key>Copy handle and key</button>
+      </section>
+      <section id="accountSignedOut">
+        <div class="form-grid">
+          <form id="accountLoginForm" class="account-form field-wide" autocomplete="off">
+            <h3>Sign in</h3>
+            <label class="field">Generated handle<input id="accountLoginHandle" type="text" maxlength="17" autocomplete="off" autocapitalize="none" required placeholder="pact-012345abcdef"></label>
+            <label class="field">Account key<input id="accountLoginKey" type="password" maxlength="64" autocomplete="off" spellcheck="false" required placeholder="64-character key"></label>
+            <button class="button button-dark" type="submit">Sign in to demo account</button>
+          </form>
+          <div class="account-form field-wide">
+            <h3>Create a demo account</h3>
+            <p>Creates a random handle and a one-time 256-bit account key. No email or real identity details are used.</p>
+            <label class="field"><span><input id="accountFictionalConfirm" type="checkbox"> I understand PACT cannot detect real data, and I will use fictional demo content only.</span></label>
+            <button id="registerAccountButton" class="button button-outline" type="button">Create pseudonymous account</button>
+          </div>
+        </div>
+      </section>
+      <section id="accountSignedIn" hidden>
+        <p id="accountSignedInLabel" class="small-disclaimer"></p>
+        <label id="accountWorkspaceSelectWrap" class="field">Your demo workspaces<select id="accountWorkspaceSelect"></select></label>
+        <label class="field account-workspace-confirm"><span><input id="accountWorkspaceFictionalConfirm" type="checkbox"> I understand PACT cannot validate entries, and I will use only fictional content.</span></label>
+        <div class="account-controls">
+          <button id="createAccountWorkspaceButton" class="button button-dark" type="button">Create fictional workspace</button>
+          <button id="joinAccountWorkspaceButton" class="button button-outline" type="button" hidden>Join Client workspace</button>
+          <button id="rotateAccountKeyButton" class="button button-outline button-small" type="button">Replace my account key</button>
+          <button id="logoutAccountButton" class="button button-plain button-small" type="button">Sign out</button>
+        </div>
+        <section id="accountInviteResult" class="account-key-notice" hidden aria-live="polite">
+          <strong>One-time Client invite</strong>
+          <p>Share this link only with the intended demo participant. The first eligible account to claim it gets the Client role; it expires with the workspace.</p>
+          <label class="field">Client invite link<input id="accountInviteLink" type="url" readonly autocomplete="off"></label>
+          <button class="button button-outline button-small" type="button" data-copy-account-invite>Copy Client invite</button>
+        </section>
+      </section>
+      <p id="accountMessage" class="small-disclaimer" role="status" aria-live="polite"></p>
+      <div class="dialog-foot"><span class="quiet-note">Free-tier D1 · 30-day demo accounts and workspaces · 7-day sessions</span><div><button class="button button-plain cancel-dialog" type="button">Close</button></div></div>
+    </div>
   </dialog>
 
   <dialog id="changeDialog" class="dialog-card">

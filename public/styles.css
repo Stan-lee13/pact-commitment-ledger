@@ -205,6 +205,18 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .field-hint { color: #a0a9a2; font-weight: 500; }
 .field input, .field textarea, .field select { width: 100%; border: 1px solid #dfe5dc; border-radius: 9px; padding: 10px 11px; background: #fff; color: var(--ink); font-size: 11px; font-weight: 500; resize: vertical; }
 .field input::placeholder, .field textarea::placeholder { color: #afb7af; }
+.account-form { display: flex; flex-direction: column; gap: 11px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.account-form h3 { margin: 0; color: var(--forest); font-size: 13px; }
+.account-form p, .account-key-notice p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
+.account-form .field input[type="checkbox"], .account-workspace-confirm input[type="checkbox"] { width: auto; accent-color: var(--forest); }
+.account-form .field span, .account-workspace-confirm span { display: flex; align-items: center; gap: 8px; }
+.account-key-notice { display: grid; gap: 10px; margin: 14px 0; padding: 14px; border: 1px solid #dce8c4; border-radius: 12px; background: #f7fbef; }
+.account-key-notice > strong { color: #405b35; font-size: 12px; }
+.account-key-notice .field input { overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; }
+.account-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
+.account-workspace-confirm { margin-top: 12px; }
+.account-workspace-confirm span { font-weight: 650; }
+#accountMessage.account-error { color: #a64e3e; font-weight: 700; }
 .ai-disclosure { margin-top: 16px; border: 1px solid #e3ead8; border-radius: 12px; background: #f8fbf2; }
 .ai-disclosure summary { display: flex; align-items: center; gap: 10px; list-style: none; cursor: pointer; padding: 13px; }
 .ai-disclosure summary::-webkit-details-marker { display: none; }
@@ -289,6 +301,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .brand { font-size: 19px; }.top-nav { display: none; }.top-actions { gap: 7px; }
   .role-switch-label { display: none; }.role-select { padding: 9px 22px 9px 9px; }
   .top-actions .button { padding: 10px 11px; font-size: 10px; }
+  #accountButton { max-width: 112px; overflow: hidden; text-overflow: ellipsis; }
   .page-shell { padding: 13px 14px 26px; }
   .demo-banner { align-items: start; font-size: 9px; }.demo-banner-end { display: none; }
   .hero-panel { min-height: 310px; border-radius: 18px; }
@@ -305,7 +318,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .evidence-layout { grid-template-columns: 1fr; }
   .progress-item { align-items: start; flex-direction: column; }.progress-control, .progress-control select { width: 100%; }.reminder-heading { flex-direction: column; }.obligation-row { align-items: start; }
   .page-footer { flex-direction: column; font-size: 8px; }
-  .dialog-form { padding: 18px; }.dialog-head h2 { font-size: 22px; }.form-grid { gap: 10px; }.field { font-size: 9px; }.field input, .field textarea { padding: 9px; font-size: 10px; }
+  .dialog-form { padding: 18px; }.dialog-head h2 { font-size: 22px; }.form-grid { gap: 10px; }.field { font-size: 9px; }.field input, .field textarea { padding: 9px; font-size: 10px; }.account-controls { align-items: stretch; flex-direction: column; }.account-controls .button { width: 100%; }
   .dialog-foot { align-items: start; flex-direction: column; }.dialog-foot > div { width: 100%; justify-content: end; }.dialog-foot .button { padding: 10px 11px; }
 }
 @media (max-width: 390px) {

@@ -18,11 +18,18 @@ function req(body, origin = "https://pact-commitment-ledger.vercel.app") {
 
 test("public state reports shared D1 availability without revealing the Worker endpoint", async () => {
   const { res } = harness();
-  await createStateHandler({ PACT_SHARED_STORAGE_URL: "https://pact-demo-storage.stanleyvic13.workers.dev" })({ method: "GET" }, res);
+  await createStateHandler({
+    PACT_SHARED_STORAGE_URL: "https://pact-demo-storage.stanleyvic13.workers.dev",
+    PACT_PUBLIC_URL: "https://pact-commitment-ledger.vercel.app"
+  })({ method: "GET" }, res);
   const payload = JSON.parse(res.body);
   assert.equal(payload.config.sharedStorageAvailable, true);
+  assert.equal(payload.config.accountDemoAvailable, true);
   assert.equal(payload.config.storage, "browser_local");
   assert.equal(JSON.stringify(payload).includes("workers.dev"), false);
+  const { res: incomplete } = harness();
+  await createStateHandler({ PACT_SHARED_STORAGE_URL: "https://pact-demo-storage.stanleyvic13.workers.dev" })({ method: "GET" }, incomplete);
+  assert.equal(JSON.parse(incomplete.body).config.accountDemoAvailable, false);
 });
 
 test("shared API proxy forwards only to HTTPS workers.dev and merges AI config while disabling shared-mode PayPal", async () => {

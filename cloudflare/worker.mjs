@@ -7,6 +7,7 @@ import {
   updateDeliverableProgress
 } from "./domain.mjs";
 import { createSeedState } from "./demo-data.mjs";
+import { findAccountWorkspace, handleAccountAction } from "./accounts.mjs";
 
 const INVITE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_ACTIVE_SHARES = 128;
@@ -146,31 +147,38 @@ async function findInvite(env, token, nowText) {
   `).bind(hashed, nowText, nowText).first();
 }
 
-function scopedState(row) {
+function scopedState(row, storage = "shared_d1") {
   const state = cleanState(JSON.parse(row.state_json));
   return {
     ...state,
     demoOnly: true,
     config: {
       publicDemo: true,
-      storage: "shared_d1",
+      storage,
       sharedRole: row.role,
-      inviteExpiresAt: row.invite_expires_at,
+      inviteExpiresAt: row.invite_expires_at || row.workspace_expires_at,
+      accountAuthenticated: storage === "account_d1",
       paypal: { configured: false, environment: "sandbox" }
     }
   };
 }
 
-async function runScopedRequest(request, env, payload, now) {
-  const token = String(payload.token || "");
-  if (!/^[a-f0-9]{64}$/.test(token)) fail("This shared demo invite link is missing or invalid.", 404);
+async function runScopedRequest(request, env, payload, now, accountContext = null) {
   const nowText = now.toISOString();
-  const row = await findInvite(env, token, nowText);
-  if (!row) fail("This shared demo invite has expired or is invalid.", 404);
+  let row;
+  if (accountContext) {
+    row = await findAccountWorkspace(env, accountContext.accountId, payload.workspaceId, nowText);
+    if (!row) fail("This account is not a member of the requested demo workspace, or it has expired.", 404);
+  } else {
+    const token = String(payload.token || "");
+    if (!/^[a-f0-9]{64}$/.test(token)) fail("This shared demo invite link is missing or invalid.", 404);
+    row = await findInvite(env, token, nowText);
+    if (!row) fail("This shared demo invite has expired or is invalid.", 404);
+  }
 
   const method = String(payload.method || "GET").toUpperCase();
   const pathname = new URL(String(payload.path || "/"), "https://pact.invalid").pathname;
-  if (method === "GET" && pathname === "/api/state") return json(scopedState(row));
+  if (method === "GET" && pathname === "/api/state") return json(scopedState(row, accountContext ? "account_d1" : "shared_d1"));
   if (method !== "POST") fail("Only shared demo update requests are supported.", 405);
 
   const state = JSON.parse(row.state_json);
@@ -180,6 +188,32 @@ async function runScopedRequest(request, env, payload, now) {
   const role = row.role;
   if (pathname === "/api/shared-invites/client") {
     if (role !== "provider") fail("Only the Provider invite can replace the Client invite.", 403);
+    if (accountContext) {
+      const replacementToken = newToken();
+      const replacementHash = await tokenHash(replacementToken);
+      const results = await env.PACT_DB.batch([
+        env.PACT_DB.prepare(`
+          DELETE FROM demo_workspace_invites WHERE workspace_id = ? AND expires_at <= ?
+        `).bind(row.workspace_id, nowText),
+        env.PACT_DB.prepare(`
+        UPDATE demo_workspace_invites
+        SET token_hash = ?, created_at = ?
+        WHERE workspace_id = ? AND created_by = ? AND role = 'client' AND expires_at > ?
+        `).bind(replacementHash, nowText, row.workspace_id, accountContext.accountId, nowText),
+        env.PACT_DB.prepare(`
+          INSERT INTO demo_workspace_invites (workspace_id, token_hash, role, created_by, created_at, expires_at)
+          SELECT ?, ?, 'client', ?, ?, ?
+          WHERE EXISTS (SELECT 1 FROM shared_workspaces WHERE id = ? AND expires_at > ?)
+            AND EXISTS (SELECT 1 FROM demo_workspace_memberships WHERE workspace_id = ? AND account_id = ? AND role = 'provider')
+            AND NOT EXISTS (SELECT 1 FROM demo_workspace_memberships WHERE workspace_id = ? AND role = 'client')
+            AND NOT EXISTS (SELECT 1 FROM demo_workspace_invites WHERE workspace_id = ?)
+        `).bind(row.workspace_id, replacementHash, accountContext.accountId, nowText, row.workspace_expires_at, row.workspace_id, nowText, row.workspace_id, accountContext.accountId, row.workspace_id, row.workspace_id)
+      ]);
+      if (Number(results[1]?.meta?.changes ?? 0) + Number(results[2]?.meta?.changes ?? 0) !== 1) {
+        fail("A Client is already a member, or the invitation changed at the same time. Create a new fictional demo workspace if needed.", 409);
+      }
+      return json({ role: "client", clientToken: replacementToken, expiresAt: row.workspace_expires_at, replaced: true });
+    }
     const clientInvite = await env.PACT_DB.prepare(`
       SELECT token_hash FROM shared_invites
       WHERE workspace_id = ? AND role = 'client' AND expires_at > ?
@@ -257,6 +291,13 @@ export async function handleSharedRequest(request, env, { now: nowSource = () =>
   try {
     if (payload.action === "create") return await createSharedDemo(request, env, now, payload);
     if (payload.action === "request") return await runScopedRequest(request, env, payload, now);
+    if (payload.action === "account") {
+      return await handleAccountAction(request, env, payload, now, {
+        json,
+        demoSeed,
+        runWorkspaceRequest: (accountContext, accountPayload) => runScopedRequest(request, env, accountPayload, now, accountContext)
+      });
+    }
     return json({ error: "Unknown shared demo operation." }, 404);
   } catch (error) {
     if (error instanceof DomainError) return json({ error: error.message }, error.status || 400);
